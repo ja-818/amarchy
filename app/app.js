@@ -56,6 +56,9 @@ const ICONS = {
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
   preview: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+  // A chat's preview beside it (preview.js), and its page loaded again.
+  pane: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="1.5"/><path d="M12.5 4.5v15M15.5 9h2.5M15.5 12.5h2.5"/></svg>',
+  reload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4.5v5h-5"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   medal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3l-3 6M16 3l3 6M9 3h6"/><circle cx="12" cy="15" r="6"/><path d="M12 12.5l.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3z" fill="currentColor" stroke-width="1"/></svg>',
   bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 2L4 13.5h6.5L9.5 22 20 9.5h-6.5z"/></svg>',
@@ -946,6 +949,7 @@ function openList() {
 // The list changed: the board (tasks.js), on a computer under its chat (desk.js).
 function refresh() {
   uiPreviewSettle();     // a preview started from here answers, or stopped (ui.js)
+  previewRefresh();      // a preview beside its chat, as the list has it (preview.js)
   if (app.desk) { deskList(); boardRefresh(); }
   else if (!app.session) renderHome();
   else uiWhenStill(`head-${app.session.id}`, () => { if (app.session) app.session.renderHeader(); });      // its preview, as the list has it
@@ -1261,6 +1265,7 @@ class SessionView {
     this.chat.close();
     this.closed = true;
     if (this._terminal) this._terminal.close();
+    if (this.mode === "preview") phonePreview().hide();      // (its pages stay loaded: back on this chat, as they were)
     clearInterval(this.seen);
   }
 
@@ -1269,6 +1274,7 @@ class SessionView {
     this.chat.reopen();
     this.closed = false;
     if (this.mode === "terminal") this.terminal.open(this.id);
+    if (this.mode === "preview") this.setMode("preview");
     this.seen = setInterval(() => this.markSeen(), 10000);
     this.markSeen();
   }
@@ -1285,21 +1291,28 @@ class SessionView {
     const listed = rowOf(this.id);
     const r = { ...(this.row || { id: this.id, repo: "", task: "…" }), ...(listed ? { previews: listed.previews } : {}) };
     if (this.row) this.chat.setPlaceholder(composerPlaceholder(r));
+    const shown = this.mode === "preview";
     uiSwap(this.titleEl, uiChatHead(r, {
-      back: () => { if (this.mode === "terminal") this.setMode("chat"); else go("#/"); },
+      back: () => { if (this.mode !== "chat") this.setMode("chat"); else go("#/"); },
       rename: () => { if (this.row) renameSheet(this.row); },
       complete: this.row ? () => todayComplete(this.row) : null,
-      more: () => this.menu() }));
+      more: () => this.menu(),
+      // Its preview over the chat, Chat | Preview as Chat | Terminal (preview.js); again, the chat.
+      preview: { show: (p) => this.setMode("preview", p.key || ""), hide: () => this.setMode("chat"), on: shown, key: shown ? phonePreview().key : "" } }));
   }
 
-  // The conversation, or the session's terminals (the project's, or Claude's
-  // classic one: terminal.js, its keys under it).
+  // The conversation, the session's terminals (the project's, or Claude's
+  // classic one: terminal.js, its keys under it), or its preview (preview.js:
+  // which, of several, its key; its page stays loaded while you're back on the chat).
   setMode(mode, which) {
+    const was = this.mode;
+    if (mode === "preview" && !uiPreviews(rowOf(this.id) || this.row).length) mode = "chat";
     this.mode = mode;
     this.el.classList.toggle("terminal", mode === "terminal");
+    this.el.classList.toggle("previewing", mode === "preview");
     const term = mode === "terminal";
     if (!term && this._terminal) this._terminal.close();
-    this.chat.el.hidden = term;
+    this.chat.el.hidden = mode !== "chat";
     if (this._terminal) this._terminal.el.hidden = !term;
     if (term) {
       const t = this.terminal;
@@ -1307,6 +1320,12 @@ class SessionView {
       if (which === "classic") t.classic();
       else t.open(this.id).then(() => { if (which) t.show(which); });
     }
+    const pane = phonePreview();
+    if (mode === "preview") {
+      phonePreviewPlace(this.titleEl);
+      pane.show({ ...(rowOf(this.id) || this.row || {}), id: this.id }, which === undefined ? null : which);
+    } else pane.hide();
+    if (was !== mode) { uiWhole(); this.renderHeader(); }
   }
 
   menu() {
@@ -1338,6 +1357,28 @@ class SessionView {
       agent ? null : closeButton({ ...row, id: this.id }),
       h("div", { class: "section" }, terminalsShown() ? "Terminals" : "Advanced"), terminals);
   }
+}
+
+// The phone's preview (preview.js): one for every chat, kept in the page's
+// body from the first time it shows (a page taken out of it loads again; a
+// chat's view is made anew each time it opens), over the chat under its
+// head while it's Chat | Preview.
+let phonePreviewPane = null;
+function phonePreview() {
+  if (!phonePreviewPane) {
+    phonePreviewPane = new PreviewPane({ phone: true });
+    document.body.append(phonePreviewPane.el);
+    const again = () => { if (app.session && app.session.mode === "preview") phonePreviewPlace(app.session.titleEl); };
+    window.addEventListener("resize", again);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", again);
+  }
+  return phonePreviewPane;
+}
+
+// Its top: the chat's head's bottom, wherever the phone has it.
+function phonePreviewPlace(head) {
+  const top = head && head.isConnected ? Math.round(head.getBoundingClientRect().bottom) : 0;
+  phonePreview().el.style.setProperty("--preview-top", `${top}px`);
 }
 
 // The text size of the terminals on the phone (A−/A+ there).

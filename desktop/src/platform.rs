@@ -221,6 +221,19 @@ pub fn webview(win: &tauri::WebviewWindow) {
     let _ = win;
 }
 
+/// What a frame in the window may load (its page's amarchyDesktop.frames;
+/// app/preview.js, a chat's preview beside the chat): "any" page where the
+/// window's own loads are told apart from its frames' (Linux: WebKitGTK says
+/// which is the window's, linux::main_frame_only), else "tailnet" (a
+/// preview's address only: main.rs preview_address).
+pub fn frames() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "any"
+    } else {
+        "tailnet"
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use std::cell::RefCell;
@@ -723,7 +736,44 @@ mod linux {
             page_errors(&view);
         });
         load_failures(win);
+        main_frame_only(win);
         process_ends(win);
+    }
+
+    /// The window's own page held to amarchy's (main.rs lets any page load in
+    /// a frame of its: a chat's preview beside the chat, what that page
+    /// shows): one it's about to show from anywhere else (a link without a
+    /// target, a redirect away) goes to your browser instead, before amarchy's
+    /// page is left. WebKitGTK says which answer is the window's own page
+    /// (its response's policy, main frame, main resource); wry decides only
+    /// navigations, so this is heard after it.
+    fn main_frame_only(win: &tauri::WebviewWindow) {
+        use tauri::Manager;
+        let handle = win.app_handle().clone();
+        let _ = win.with_webview(move |wv| {
+            use webkit2gtk::{PolicyDecisionExt, PolicyDecisionType, ResponsePolicyDecision, ResponsePolicyDecisionExt, URIRequestExt, URIResponseExt, WebViewExt};
+            use webkit2gtk::glib::prelude::Cast;
+            wv.inner().connect_decide_policy(move |_, decision, kind| {
+                if kind != PolicyDecisionType::Response {
+                    return false;
+                }
+                let Some(d) = decision.downcast_ref::<ResponsePolicyDecision>() else { return false };
+                if !d.is_main_frame_main_resource() {
+                    return false;
+                }
+                // What the window asked for (after its redirects): the
+                // response's own may be another's (a proxy's, asking for its
+                // credential, names itself).
+                let uri = d.request().and_then(|r| r.uri()).or_else(|| d.response().and_then(|r| r.uri())).map(|u| u.to_string()).unwrap_or_default();
+                if url::Url::parse(&uri).map(|u| crate::window_page(&handle, &u)).unwrap_or(true) {
+                    return false;
+                }
+                log::info!("the window's page, to {uri}: in your browser instead");
+                decision.ignore();
+                crate::outward_str(&handle, &uri);
+                true
+            });
+        });
     }
 
     /// What goes wrong in its page, in its log: an error nothing caught (a
@@ -875,6 +925,12 @@ mod linux {
                 // Stopped on purpose (a new address, a download): not a failure.
                 if err.matches(webkit2gtk::NetworkError::Cancelled) || err.matches(webkit2gtk::PolicyError::FrameLoadInterruptedByPolicyChange) {
                     return false;
+                }
+                // Not amarchy's (the window's page about to go elsewhere,
+                // main_frame_only's to hold): amarchy's stays, your browser says why.
+                if url::Url::parse(uri).map(|u| !crate::window_page(&handle, &u)).unwrap_or(false) {
+                    crate::outward_str(&handle, uri);
+                    return true;
                 }
                 crate::load_failed(&handle, uri, &err.to_string());
                 true

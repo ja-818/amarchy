@@ -46,7 +46,9 @@ One board says which one needs you and what for. You answer with a tap.
 - **Previews that stay up.** What a chat serves for you to look at (a dev server) runs as the
   chat's own service, capped in memory: a sleeping Claude doesn't take it down, its Preview
   button starts it again in one tap, and completing the chat stops it and checks it's gone.
-  Two or more (an app and its storybook)? The button is Previews: pick one from its dropdown.
+  Watch it beside the chat (the side panel on a computer, Chat | Preview on the phone) while
+  you talk in the chat: it stays loaded as you move around. Two or more (an app and its
+  storybook)? The button is Previews: pick one from its dropdown.
 - **Keeps going with the lid shut.** Run amarchy on a machine that stays on. Your chats keep
   working while your laptop or phone sleeps.
 - **Every machine's chats on one board.** Your server, your desktop, a laptop: pair them

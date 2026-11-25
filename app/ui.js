@@ -945,12 +945,13 @@ function composerPlaceholder(s) { return isAgent(s) ? `Message ${s.assistant_nam
 // one height, neutral: Back (‹); its project (or your assistant's
 // picture) and its name (a tap: rename); where it stands (its tone a dot);
 // ⋯ (its menu: the Terminal, Changes and Details, its name, its
-// priority…); Complete, last. Returns the
+// priority…); its Preview (preview: {show(p), on}: shown beside the chat,
+// lit while it is; else in a tab); Complete, last. Returns the
 // children, for the head to hold.
 // Your assistant's or an agent's: its picture and name, what it's up to
 // under the name (uiPresence: typing…), as a messaging app's head has them,
 // and no state box.
-function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}) {
+function uiChatHead(s, { back, rename, complete, more, backTitle = "Back", preview = null } = {}) {
   const main = isAgent(s);
   const now = main ? uiPresence(s) : null;
   return [
@@ -966,7 +967,7 @@ function uiChatHead(s, { back, rename, complete, more, backTitle = "Back" } = {}
       main ? null : h("span", { class: "head-state", role: "status" }, todayStatePill(s), sleepMark(s)),
       h("button", { class: "control ui-action more", type: "button", title: "This chat: its terminal, changes, details…", "aria-label": "This chat",
                     "aria-haspopup": "menu", onclick: more }, glyph("more")),
-      uiPreview(s, { head: true }),
+      uiPreview(s, { head: true, ...(preview || {}) }),
       main || !complete ? null : h("button", { class: "control ui-action complete", type: "button", title: "Complete mission: it reached its goal, close it (Ctrl+Alt+W)",
                                                "aria-label": "Complete mission", onclick: complete }, glyph("check"), h("span", { class: "label" }, "Complete"))),
   ];
@@ -988,8 +989,10 @@ const uiPreviewAsked = new Map();     // chat + key -> when: asked, for the mome
 const uiPreviewStarted = new Map();   // chat + key -> {id, key}: started from here, until it answers or stops
 
 const UI_PREVIEW_WORDS = { up: "Preview", starting: "Starting…", stopped: "Start preview", failed: "Preview failed", down: "Restart preview" };
-// Each in the dropdown: where it stands, and what a tap does.
+// Each in the dropdown: where it stands, and what a tap does (in a tab;
+// over an open chat, beside it: UI_PREVIEW_SHOW).
 const UI_PREVIEW_ROW = { up: "Open", starting: "Starting…", stopped: "Not running: start it", failed: "Failed: see why", down: "Not answering: ask Claude" };
+const UI_PREVIEW_SHOW = { up: "Show it", starting: "Starting…", stopped: "Not running: start it", failed: "Failed: see why", down: "Not answering: ask Claude" };
 
 // A chat's previews, as the list has them: [{key, name, label, url, run, state}].
 function uiPreviews(s) { return (s && s.previews) || []; }
@@ -1036,7 +1039,8 @@ function uiPreviewSettle() {
     uiPreviewStarted.delete(at);
     if (!state) continue;
     const name = uiPreviewName(s, p);
-    if (state === "up") toast(`${name} is ready`, { label: "Open", act: () => openLink(p.url) });
+    if (state === "up" && typeof previewShowing === "function" && previewShowing(id, key)) continue;      // in sight: its page is there already
+    if (state === "up") toast(`${name} is ready`, { label: "Open", act: () => uiPreviewOpen(s, p) });
     else toast(state === "failed" ? `${name} didn't start` : `${name} stopped on its own`, { label: "See why", act: () => uiPreviewSheet(s, p) });
   }
   uiDropdownRedraw();
@@ -1058,6 +1062,21 @@ function uiPreviewGo(s, p = null, anchor = null) {
   if (state === "up") return openLink(p.url);
   if (state === "failed" || state === "starting") return uiPreviewSheet(s, p);
   if (state === "stopped") return uiPreviewStart(s, p);
+  uiPreviewAsk(s, p);
+}
+
+// Ready (its toast's Open): beside its chat when that's open here and
+// shows previews (a computer's side panel, the phone's Chat | Preview),
+// else in a tab.
+function uiPreviewOpen(s, p) {
+  if (typeof previewHere === "function" && previewHere(s, p)) return;
+  openLink(p.url);
+}
+
+// An address only, nothing answering: its Claude asked to start it again,
+// and to register it (once a minute at most).
+function uiPreviewAsk(s, p) {
+  const ps = uiPreviews(s);
   const at = uiPreviewAt(s.id, p);
   const asked = uiPreviewAsked.get(at);
   if (asked && Date.now() - asked < 60000) return;
@@ -1075,39 +1094,69 @@ function uiPreviewAsking(s, p) {
 }
 
 // A chat's previews as a menu's items (the dropdown, uiMenu): each by its
-// name, where it stands under it; act(p) when it's picked.
-function uiPreviewItems(s, act) {
+// name, where it stands under it (words: what each state says); act(p)
+// when it's picked.
+function uiPreviewItems(s, act, words = UI_PREVIEW_ROW) {
   return uiPreviews(s).map((p) => {
     const state = uiPreviewOf(p);
     const asked = uiPreviewAsking(s, p);
-    return { label: p.label || p.url, detail: asked ? "Asked Claude…" : `${UI_PREVIEW_ROW[state]} · ${uiPreviewWhere(p.url)}`,
+    return { label: p.label || p.url, detail: asked ? "Asked Claude…" : `${words[state]} · ${uiPreviewWhere(p.url)}`,
              icon: state === "starting" ? "" : "preview", lead: state === "starting" ? spinner() : null, bad: state === "failed",
              tone: state, disabled: asked, act: () => act(p) };
   });
 }
 
 // Previews, its dropdown: a tap on one does what its own button would.
-function uiPreviewDropdown(s, anchor) {
+// Over an open chat (beside: {show, hide, on, key}), a tap on one shows it
+// beside the chat (uiPreviewBeside), the one shown checked.
+function uiPreviewDropdown(s, anchor, beside = null) {
   const id = s.id;
-  return uiDropdown(anchor, () => uiPreviewItems(rowOf(id) || s, (p) => uiPreviewGo(rowOf(id) || s, p)),
-                    { label: "Previews", key: `previews:${id}` });
+  const pick = (p) => (beside ? uiPreviewBeside(rowOf(id) || s, p, beside.show) : uiPreviewGo(rowOf(id) || s, p));
+  const items = () => {
+    const r = rowOf(id) || s;
+    const all = uiPreviewItems(r, pick, beside ? UI_PREVIEW_SHOW : UI_PREVIEW_ROW);
+    return beside && beside.on ? all.map((it, i) => ({ ...it, on: (uiPreviews(r)[i].key || "") === (beside.key || "") })) : all;
+  };
+  return uiDropdown(anchor, items, { label: "Previews", key: `previews:${id}` });
 }
 
-function uiPreview(s, { head = false } = {}) {
+// Shown beside its chat (show(p): the side panel's Preview on a computer,
+// the phone's Chat | Preview), and as its button says: not running,
+// started; nothing answering, its Claude asked.
+function uiPreviewBeside(s, p, show) {
+  const state = uiPreviewOf(p);
+  show(p);
+  if (state === "stopped") uiPreviewStart(s, p);
+  else if (state === "down" && !uiPreviewAsking(s, p)) uiPreviewAsk(s, p);
+}
+
+// Its button. Over an open chat that shows previews beside it (show, hide,
+// on: shown now, key: which), a tap shows it there (lit while it is: a tap
+// again, back to the chat alone); else as uiPreviewGo.
+function uiPreview(s, { head = false, show = null, hide = null, on = false, key = "" } = {}) {
   const ps = uiPreviews(s);
   if (!ps.length) return null;
-  if (ps.length > 1) return uiPreviewsButton(s, ps, head);
+  const beside = head && show ? { show, hide, on, key } : null;
+  if (ps.length > 1) return uiPreviewsButton(s, ps, head, beside);
   const p = ps[0];
   const state = uiPreviewOf(p);
   if (state !== "down") uiPreviewAsked.delete(uiPreviewAt(s.id, p));
   const asked = uiPreviewAsking(s, p);
   const words = asked ? "Restarting…" : UI_PREVIEW_WORDS[state];
-  const title = { up: `Open ${p.url}`, starting: `${p.url} is starting: see what it writes`,
+  const there = typeof app !== "undefined" && app.desk ? "beside the chat" : "over the chat";
+  const title = beside ? (on ? "Back to the chat alone (Ctrl+Alt+O)" : { up: `Show it ${there} (Ctrl+Alt+O)`, starting: `${p.url} is starting: show it ${there}`,
+                  stopped: `Start ${p.url}, ${there}`, failed: `${p.url} stopped with an error: see why`,
+                  down: `${p.url} isn't answering: ask its Claude to start it again` }[state])
+    : { up: `Open ${p.url}`, starting: `${p.url} is starting: see what it writes`,
                   stopped: `Start ${p.url}`, failed: `${p.url} stopped with an error: see why`,
                   down: `${p.url} isn't answering: ask its Claude to start it again` }[state];
   const go = (e) => {
     e.stopPropagation();
     e.preventDefault();
+    if (beside) {
+      if (on && hide) return hide();
+      return uiPreviewBeside(s, p, show);
+    }
     uiPreviewGo(s, p);
     if (state === "down") {
       const b = e.currentTarget;
@@ -1116,30 +1165,31 @@ function uiPreview(s, { head = false } = {}) {
     }
   };
   const busy = state === "starting";
-  const cls = `ui-preview${state === "failed" ? " bad" : ""}${busy ? " busy" : ""}`;
+  const cls = `ui-preview${state === "failed" ? " bad" : ""}${busy ? " busy" : ""}${beside && on ? " on" : ""}`;
   if (head) return h("button", { class: `control ui-action ${cls}`, type: "button", title, "aria-label": words, "aria-busy": busy ? "true" : null,
-                                 disabled: asked || null, onclick: go }, busy ? spinner() : glyph("preview"), h("span", { class: "label" }, words));
+                                 "aria-pressed": beside ? String(!!on) : null, disabled: (asked && !beside) || null, onclick: go },
+                     busy ? spinner() : glyph(beside ? "pane" : "preview"), h("span", { class: "label" }, words));
   if (state === "up") return h("a", { class: `tbtn ${cls}`, href: p.url, target: "_blank", rel: "noopener", title, onclick: go }, glyph("preview"), words);
   return h("button", { class: `tbtn ${cls}`, type: "button", title, "aria-busy": busy ? "true" : null, disabled: asked || null, onclick: go }, busy ? spinner() : null, words);
 }
 
 // Several: Previews, and a tap opens the dropdown of them. It turns while
 // one starts, and says when one failed.
-function uiPreviewsButton(s, ps, head) {
+function uiPreviewsButton(s, ps, head, beside = null) {
   const states = ps.map(uiPreviewOf);
   const busy = states.includes("starting"), bad = states.includes("failed");
-  const title = `${ps.length} previews: ${ps.map((p) => p.label).join(", ")}`;
+  const title = `${ps.length} previews: ${ps.map((p) => p.label).join(", ")}${beside ? ": show one beside the chat" : ""}`;
   const open = (e) => {
     e.stopPropagation();
     e.preventDefault();
     const b = e.currentTarget;
     if (uiDropdownOpen(`previews:${s.id}`, b)) return uiDropdownClose();
-    uiPreviewDropdown(s, b);
+    uiPreviewDropdown(s, b, beside);
   };
-  const cls = `ui-preview ui-previews${bad ? " bad" : ""}${busy ? " busy" : ""}`;
+  const cls = `ui-preview ui-previews${bad ? " bad" : ""}${busy ? " busy" : ""}${beside && beside.on ? " on" : ""}`;
   const attrs = { type: "button", title, "aria-label": "Previews", "aria-haspopup": "menu", "aria-expanded": "false",
                   "aria-busy": busy ? "true" : null, "data-dropdown": `previews:${s.id}`, onclick: open };
-  if (head) return h("button", { class: `control ui-action ${cls}`, ...attrs }, busy ? spinner() : glyph("preview"),
+  if (head) return h("button", { class: `control ui-action ${cls}`, ...attrs }, busy ? spinner() : glyph(beside ? "pane" : "preview"),
                      h("span", { class: "label" }, "Previews"), glyph("down", "ui-drop-mark"));
   return h("button", { class: `tbtn ${cls}`, ...attrs }, busy ? spinner() : null, "Previews", glyph("down", "ui-drop-mark"));
 }

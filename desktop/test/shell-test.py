@@ -8,7 +8,10 @@
 # wallpaper through it when it wears the desktop's look live, its whole
 # window drawn again a moment after a big change, every frame when asked), what it may and may not do (the microphone yes,
 # notifications and the shell's own commands no), links out in your browser (a
-# chat's Preview by click and key, a link in a reply), its window size kept.
+# chat's Preview on its card, Open in a tab, a link in a reply), a chat's
+# preview beside it in a frame (its page and what it embeds load there, its
+# links out go to your browser, the window stays on amarchy), its window
+# size kept.
 #
 #   python3 desktop/test/shell-test.py          exits 0 when every check passed
 #
@@ -264,13 +267,18 @@ def opens_chats(w, server, how):
     board()
 
 
-def links_out(w, server, log):
+def links_out(w, server, log, preview, asked):
     """A chat's Preview and a link in a reply open in your browser (xdg-open),
-    by real clicks and keys: Preview on its card, on its head, Ctrl+Alt+O,
-    the reply's link. The window stays on amarchy. (Julian's M5: the opener
-    plugin's script took every link that opens a new window and asked the
-    plugin from the page, which no page may: nothing opened.)"""
-    preview, docs = "https://preview.example:4631/", "https://docs.example/page"
+    by real clicks and keys: Preview on its card, the reply's link. The
+    window stays on amarchy. (Julian's M5: the opener plugin's script took
+    every link that opens a new window and asked the plugin from the page,
+    which no page may: nothing opened.) Over the chat, its Preview shows it
+    beside the chat, in a frame (preview: a page the test serves, asked: what
+    it was asked for): its page loads there, and the page it embeds (another
+    origin) too, nothing in your browser; a link in it opens in the frame, one
+    to a new tab in your browser; Open in a tab, your browser; Ctrl+Alt+O, the
+    chat alone again."""
+    docs = "https://docs.example/page"
 
     def opened(url, what):
         got = wait_for(lambda: log.exists() and url in log.read_text(), timeout=10, every=0.2)
@@ -297,13 +305,66 @@ def links_out(w, server, log):
     w.wait(CHAT_OPEN, timeout=20)
     head = "[...document.querySelectorAll('button.ui-action.ui-preview')].find((b) => b.offsetParent)"
     w.wait(f"!!({head})", timeout=20)
+    check(bool(w.js("window.amarchyDesktop.frames === 'any'")), "the page knows its frames may load any page (Linux)")
+    asked.clear()
     click(head, "head")
-    opened(preview, "Preview on the chat's head")
+    frame = f"document.querySelector('.sidepanel .preview-pane:not([hidden]) iframe.preview-frame[src=\"{preview}\"]:not([hidden])')"
+    check(bool(w.wait(f"!!{frame}", timeout=20)), "Preview on the chat's head: beside the chat, in a frame")
+    check(bool(wait_for(lambda: "/" in asked and "/embed" in asked, timeout=15)), f"its page loads there, and the page it embeds (another origin) ({sorted(asked)})")
+    time.sleep(1.5)
+    check(not log.exists(), f"nothing opened in your browser ({log.read_text().strip() if log.exists() else ''})")
+    check(w.do("url").startswith(server.url), "the window stays on amarchy")
+    w.shot(SHOTS / "preview-beside.png")
+    # Its links: one in the frame stays there, one to a new tab is your browser's.
+    at = w.js(f"(() => {{ const r = {frame}.getBoundingClientRect(); return [r.left, r.top]; }})()")
+    w.click(at[0] + 60, at[1] + 30)      # (its page's "Next" link: the first thing on it)
+    check(bool(wait_for(lambda: "/second" in asked, timeout=10)), "a link in it: the next page, in the frame")
+    time.sleep(1)
+    check(not log.exists() and w.do("url").startswith(server.url), "nothing in your browser, the window on amarchy")
+    asked.clear()
+    w.js(f"{frame}.src = {json.dumps(preview)}; 1")
+    wait_for(lambda: "/embed" in asked, timeout=10)
+    time.sleep(0.5)
+    w.click(at[0] + 60, at[1] + 90)      # (its "Out" link, to a new tab)
+    opened("https://docs.example/out", "a link in it to a new tab")
+    w.click_el(".sidepanel .preview-bar .ui-tool[aria-label='Open in a tab']")
+    opened(preview, "Open in a tab")
     w.key("ctrl+alt+o")
-    opened(preview, "Ctrl+Alt+O in the chat")
+    check(bool(w.wait("!document.querySelector('.desk-root').classList.contains('side-open')", timeout=10)), "Ctrl+Alt+O: the chat alone again")
+    time.sleep(0.5)
+    check(not log.exists(), "and nothing opened")
     link = f"[...document.querySelectorAll('.msg a[href=\"{docs}\"]')].find((a) => a.offsetParent)"
     click(link, "link")
     opened(docs, "A link in a reply")
+
+
+def preview_pages():
+    """A chat's preview, served here: its page (a link to its next page in
+    the frame, one out to a new tab, a page of another origin in a frame of
+    its own), the next page, the one it embeds. What's asked for, written
+    down (a set of paths)."""
+    import http.server
+    asked = set()
+    page = ("<!doctype html><style>body{margin:0;font:16px sans-serif}a{display:block;width:120px;height:40px;line-height:40px;margin:10px 0 20px}"
+            "iframe{width:300px;height:120px;border:0}</style><a id=next href='/second'>Next</a>"
+            "<a id=out href='https://docs.example/out' target='_blank'>Out</a><iframe src='http://localhost:{port}/embed'></iframe>")
+
+    class Pages(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            asked.add(path)
+            body = {"/": page.replace("{port}", str(self.server.server_address[1])), "/second": "<p>second</p>", "/embed": "<p>embedded</p>"}.get(path, "")
+            self.send_response(200 if body else 404)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Pages)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, asked
 
 
 def on_app(w, timeout=30):
@@ -1213,6 +1274,8 @@ def main():
         # ---- links out: a chat's Preview and a link in a reply, from
         # real clicks and keys, open in your browser.
         print("links out")
+        pages, served = preview_pages()
+        os.environ["AMARCHY_TEST_PREVIEW_URL"] = preview = f"http://127.0.0.1:{pages.server_address[1]}/"
         linked = Server("--preview")
         try:
             home = tempfile.mkdtemp(prefix="desktop-home-")
@@ -1221,10 +1284,12 @@ def main():
             env["PATH"] = f"{opener}:{env['PATH']}"
             with Shell(linked.url, home=home, env=env) as w:
                 on_app(w)
-                links_out(w, linked, Path(opener, "opened.log"))
+                links_out(w, linked, Path(opener, "opened.log"), preview, served)
                 w.shot(SHOTS / "links-out.png")
         finally:
             linked.stop()
+            pages.shutdown()
+            os.environ.pop("AMARCHY_TEST_PREVIEW_URL", None)
 
         # ---- the window's size, kept.
         omarchy_desktop(remote)

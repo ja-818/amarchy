@@ -140,6 +140,12 @@ here holds for both.
 - **Chat | Terminal** on the phone, or a side panel on a computer: the
   project's terminal (Run, and the saved commands) and the **Changes** and
   **Details** tabs (the branch, the worktree and the base live there).
+- **Chat | Preview** on the phone, or the side panel's **Preview** tab on a
+  computer: the chat's preview (below), live, in a frame beside the chat, so
+  they watch it change while they talk to you (its head's Preview button, or
+  Ctrl+Alt+O). Its page stays loaded as they move around. A page that refuses
+  to be framed (X-Frame-Options, CSP frame-ancestors) only opens in a tab: when
+  you serve one for them, let the app's address frame it.
   Under a terminal, on both, a **message line** as in a messaging app: what
   they write, dictate or paste there goes in when they send it, then Enter.
   Holding a finger on the terminal (a right click) gives **Paste** and

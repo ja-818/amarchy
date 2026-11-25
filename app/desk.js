@@ -3,7 +3,8 @@
 // cards. A chat opened takes the window over it (chat.js, the phone's), and
 // beside it a side panel with its Terminal (the
 // session's own, and Claude's classic one: real terminals, xterm.js, attached
-// to the session's tmux on the host), its Changes and its Details. The phone
+// to the session's tmux on the host), its Preview (its page, live:
+// preview.js), its Changes and its Details. The phone
 // and every browser show the same session at once. The keys are amarchy's
 // (Ctrl+Alt+…), the look the one picked in the app (openLook). Loaded before
 // app.js, whose helpers it uses (h, glyph, api, toast, sessionRow…); app.js
@@ -18,9 +19,11 @@ const desk = {
   sideTab: null,        // the side panel's tab you left open: term, changes, details, none (closed)
   sideWide: false,      // the side panel over the whole width
   sideWidth: 0,
+  previewWidth: 0,      // the Preview's own (0: half the window), dragged apart from the others'
   sideOn: null,         // the tab and the chat the side panel's view was opened on
   revealed: false,      // a terminal asked for with Show terminals off: shown, for this session
   terminal: null,       // the side panel's views
+  preview: null,        // (its Preview: never out of the panel, so its pages stay loaded)
   changes: null,
   details: null,
   statuses: null,       // each session's status as last seen, for the chime
@@ -557,12 +560,13 @@ async function copyText(text) {
 }
 
 // ---- the layout: a chat opened from the board, and beside it the side
-// panel: its Terminal, Changes and Details
+// panel: its Terminal, Preview, Changes and Details
 
 const MIN_CHAT = 440;       // the chat no narrower than this beside the side panel
 const SIDE_MIN = 340;       // the side panel's narrowest
 const SIDE_START = 560;     // and its width until you drag its edge
-const SIDE_TABS = [["term", "Terminal", "Ctrl+Alt+T"], ["changes", "Changes", ""], ["details", "Details", ""]];
+const PREVIEW_SHARE = 0.5;  // the Preview's, until you drag it: this much of the window (a page wants room)
+const SIDE_TABS = [["term", "Terminal", "Ctrl+Alt+T"], ["preview", "Preview", "Ctrl+Alt+O"], ["changes", "Changes", ""], ["details", "Details", ""]];
 
 // Whether the terminals show (Settings → Show terminals, the host's, on
 // unless it says off). Off, they're under the session's menu (Advanced), and
@@ -573,18 +577,31 @@ function showTerminals() {
 
 // The side panel's tab open now, or null: the one you left open (or closed),
 // else the terminal if terminals show (as the terminal beside Claude was).
+// Preview, on a chat that has none: closed.
 function sideTab() {
   const t = desk.sideTab === null ? (showTerminals() ? "term" : "none") : desk.sideTab;
-  if (t === "none" || (t === "term" && !showTerminals())) return null;
+  if (t === "none" || (t === "term" && !showTerminals()) || (t === "preview" && !hasPreview())) return null;
   return SIDE_TABS.some(([k]) => k === t) ? t : null;
+}
+
+// Whether the chat open has a preview (its Preview tab).
+function hasPreview() {
+  return !!desk.current && uiPreviews(row(desk.current)).length > 0;
+}
+
+// The tabs the panel has for the chat open.
+function sideTabs() {
+  return SIDE_TABS.filter(([k]) => (k !== "term" || showTerminals()) && (k !== "preview" || hasPreview()));
 }
 
 function deskStart() {
   document.body.classList.add("desk");
   desk.sideTab = store.get("desk-side") || null;
   desk.sideWidth = parseInt(store.get("desk-side-width"), 10) || SIDE_START;
+  desk.previewWidth = parseInt(store.get("desk-side-width-preview"), 10) || 0;
   if (desk.sideTab === null || desk.sideTab === "term") preloadXterm();
   desk.terminal = makeTerminal();
+  desk.preview = new PreviewPane({ phone: false });
   desk.changes = new DeskChanges();
   desk.details = new DeskDetails();
   desk.head = h("header", { class: "desk-head chat-head ui-bar" });
@@ -635,11 +652,24 @@ function deskLayout() {
 
 // The side panel's width (0: closed), and whether it goes over the chat.
 function sideRoom(tab, wide) {
-  const W = window.innerWidth, room = W - MIN_CHAT;
+  const W = window.innerWidth, room = W - MIN_CHAT, want = sideWidthOf(tab);
   if (!tab) return { side: 0, over: false };
   if (wide) return { side: W, over: false };
-  if (room >= SIDE_MIN) return { side: Math.max(SIDE_MIN, Math.min(desk.sideWidth, room)), over: false };
-  return { side: Math.min(Math.max(desk.sideWidth, SIDE_MIN), W - 48), over: true };
+  if (room >= SIDE_MIN) return { side: Math.max(SIDE_MIN, Math.min(want, room)), over: false };
+  return { side: Math.min(Math.max(want, SIDE_MIN), W - 48), over: true };
+}
+
+// How wide you want the panel on that tab: the Preview as you dragged it
+// (else half the window: a page wants room, the chat keeps its own), the
+// others as you dragged them.
+function sideWidthOf(tab) {
+  if (tab === "preview") return desk.previewWidth || Math.round(window.innerWidth * PREVIEW_SHARE);
+  return desk.sideWidth;
+}
+
+function sideWidthSet(tab, px) {
+  if (tab === "preview") desk.previewWidth = px;
+  else desk.sideWidth = px;
 }
 
 // The panes' outlines: which one has the keyboard.
@@ -707,6 +737,7 @@ function show(id) {
     desk.terminal.close();
     desk.changes.close();
     desk.details.close();
+    desk.preview.hide();
     deskLayout();
     if (changed) boardShown();
   }
@@ -763,13 +794,16 @@ function deskHead() {
   if (!s) { desk.head.replaceChildren(); return; }
   // The box calls your assistant or an agent by its name, as the phone's does.
   if (desk.chat && desk.chat.id === s.id) desk.chat.setPlaceholder(composerPlaceholder(s));
-  // The chat's head (ui.js), as the phone's; its side panel's tabs in ⋯.
+  // The chat's head (ui.js), as the phone's; its side panel's tabs in ⋯;
+  // its Preview beside it (lit while it's there).
+  const shown = sideTab() === "preview";
   uiSwap(desk.head, uiChatHead(s, {
     backTitle: "Back to the board (Ctrl+Alt+←)", back: () => boardBack(), rename: () => renameSession(),
-    complete: () => closeCurrent(), more: () => sessionMenu(row(desk.current) || s) }));
+    complete: () => closeCurrent(), more: () => sessionMenu(row(desk.current) || s),
+    preview: { show: (p) => deskPreview(p.key || ""), hide: () => sideToggle(null), on: shown, key: shown ? desk.preview.key : "" } }));
 }
 
-const SIDE_ICONS = { term: "run", changes: "diff", details: "info" };
+const SIDE_ICONS = { term: "run", preview: "pane", changes: "diff", details: "info" };
 
 // The desk's own icons, drawn as the chat's are (chat.js's icon()).
 const DESK_ICONS = {
@@ -796,11 +830,12 @@ function buildSide() {
   side.wideBtn = h("button", { class: "side-btn", type: "button", onclick: () => sideWide() });
   side.grip = h("div", { class: "side-grip", title: "Drag to resize; double-click: back to its width", role: "separator",
                          "aria-orientation": "vertical" });
+  // (Its Preview beside its body, never in it: taken out of the page, a page would load again.)
   side.el = h("aside", { class: "sidepanel", "aria-label": "Side panel" }, side.grip,
     h("div", { class: "side-head" }, side.tabs, side.wideBtn,
       h("button", { class: "side-btn", type: "button", title: "Close the panel", "aria-label": "Close the panel",
                     onclick: () => sideToggle(null) }, glyph("close"))),
-    side.body);
+    side.body, desk.preview.el);
   // Its edge, dragged: its width (kept in this browser). While it moves,
   // only the width, once a frame; let go, the rest follows (deskLayout).
   side.grip.addEventListener("pointerdown", (e) => {
@@ -809,8 +844,9 @@ function buildSide() {
     desk.el.classList.add("resizing");
     if (desk.sideWide) { desk.sideWide = false; deskLayout(); }
     let frame = 0;
+    const tab = sideTab();
     const move = (ev) => {
-      desk.sideWidth = Math.max(SIDE_MIN, Math.round(window.innerWidth - ev.clientX));
+      sideWidthSet(tab, Math.max(SIDE_MIN, Math.round(window.innerWidth - ev.clientX)));
       if (!frame) frame = requestAnimationFrame(() => {
         frame = 0;
         desk.el.style.setProperty("--side", `${sideRoom(desk.current && sideTab(), false).side}px`);
@@ -822,7 +858,8 @@ function buildSide() {
       side.grip.removeEventListener("pointercancel", up);
       cancelAnimationFrame(frame);
       desk.el.classList.remove("resizing");
-      store.set("desk-side-width", String(desk.sideWidth));
+      if (tab === "preview") store.set("desk-side-width-preview", String(desk.previewWidth));
+      else store.set("desk-side-width", String(desk.sideWidth));
       deskLayout();
     };
     side.grip.addEventListener("pointermove", move);
@@ -830,8 +867,8 @@ function buildSide() {
     side.grip.addEventListener("pointercancel", up, { once: true });
   });
   side.grip.addEventListener("dblclick", () => {
-    desk.sideWidth = SIDE_START;
-    store.set("desk-side-width", "");
+    if (sideTab() === "preview") { desk.previewWidth = 0; store.set("desk-side-width-preview", ""); }
+    else { desk.sideWidth = SIDE_START; store.set("desk-side-width", ""); }
     deskLayout();
   });
   return side;
@@ -864,7 +901,7 @@ function sideWide(on) {
 // full width) leaves it as it is, the keyboard in its terminal.
 function renderSide() {
   const side = desk.side, tab = desk.current ? sideTab() : null;
-  side.tabs.replaceChildren(...SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(([key, label, keys]) =>
+  side.tabs.replaceChildren(...sideTabs().map(([key, label, keys]) =>
     h("button", { class: `side-tab${tab === key ? " on" : ""}`, type: "button", role: "tab", "aria-selected": String(tab === key),
                   title: keys ? `${label} (${keys})` : label, onclick: () => sideToggle(key, true) }, label)));
   side.wideBtn.title = desk.sideWide ? "Back beside the chat" : "Full width";
@@ -883,6 +920,18 @@ function renderSide() {
   desk.sideOn = on;
   if (!tab) side.body.replaceChildren();
   side.body.classList.toggle("fill", tab === "term");
+  // Its Preview: shown over the body, or out of sight (its pages loaded still).
+  side.body.hidden = tab === "preview";
+  if (tab === "preview") desk.preview.show(row(desk.current));
+  else desk.preview.hide();
+}
+
+// The chat's preview (key: which of its several) in the side panel.
+function deskPreview(key = null) {
+  if (!desk.current || !hasPreview()) return;
+  if (key !== null) previewPicked.set(desk.current, key);
+  sideToggle("preview", true);
+  desk.preview.show(row(desk.current), key);
 }
 
 // ---- the Terminal tab: the session's own terminal, and Claude's classic
@@ -1447,9 +1496,10 @@ function deskList() {
   if (v && desk.current && !row(desk.current)) return boardBack(true);     // closed
   chime(v);
   // (The window's title is the home's count: manage.js markWaiting.)
-  // Show terminals turned on or off: the panel and the header follow.
-  const shows = showTerminals();
-  if (shows !== desk.shows) { desk.shows = shows; deskLayout(); } else deskHead();
+  // Show terminals turned on or off, or the chat's first preview (or its
+  // last gone): the panel and the header follow.
+  const shows = showTerminals(), has = hasPreview();
+  if (shows !== desk.shows || has !== desk.hasPreview) { desk.shows = shows; desk.hasPreview = has; deskLayout(); } else deskHead();
 }
 
 // The chime this page plays when a session needs you or is done (the one
@@ -1629,8 +1679,22 @@ function keysTerminal() {
   toTerminal();
 }
 
-// Ctrl+Alt+O: its preview (of several: which).
+// Ctrl+Alt+O: in a chat, its preview beside it (the one you looked at
+// last, of several: the panel's bar picks another); again, the chat alone.
+// On the board, the card's: opened (of several: which).
 function keysPreview() {
+  if (app.desk && desk.current) {
+    if (!hasPreview()) return toast("No preview in this chat yet");
+    if (sideTab() === "preview") { sideToggle(null); return toChat(); }
+    return deskPreview();
+  }
+  if (!app.desk && app.session) {
+    if (!uiPreviews(rowOf(app.session.id)).length) return toast("No preview in this chat yet");
+    const shown = app.session.mode === "preview";
+    app.session.setMode(shown ? "chat" : "preview");
+    if (shown) app.session.chat.takeKeys();
+    return;
+  }
   const s = row(keyedId());
   if (s) uiPreviewGo(s);
 }
@@ -1996,7 +2060,10 @@ function deskMenu() {
   uiMenu("Amarchy", [
     { label: "New chat", icon: "plus", key: "Ctrl+Alt+↵", act: () => boardNew() },
     open ? { label: "Back to the board", icon: "back", key: "Ctrl+Alt+←", act: () => keysBack() } : null,
-    s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+O", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
+    s && open === s.id && uiPreviews(s).length > 1 ? { label: "Show a preview", icon: "pane", key: "Ctrl+Alt+O", detail: "beside the chat",
+                                              group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewBeside(s, p, (q) => deskPreview(q.key || "")), UI_PREVIEW_SHOW) }) }
+      : s && open === s.id && uiPreviews(s).length ? { label: "Show the preview", icon: "pane", key: "Ctrl+Alt+O", detail: "beside the chat", act: () => uiPreviewBeside(s, uiPreviews(s)[0], (q) => deskPreview(q.key || "")) }
+      : s && uiPreviews(s).length > 1 ? { label: "Open a preview", icon: "preview", key: "Ctrl+Alt+O", group: () => ({ title: "Previews", items: uiPreviewItems(s, (p) => uiPreviewGo(s, p)) }) }
       : s && uiPreviews(s).length ? { label: "Open the preview", icon: "preview", key: "Ctrl+Alt+O", act: () => uiPreviewGo(s) } : null,
     s && desk.current ? { label: "View", icon: "status", desk: true, group: () => ({ title: "View", items: viewItems() }) } : null,
     s && desk.current ? { label: "This chat", icon: "more", desk: true, group: () => ({ title: s.task || where(s), items: sessionItems(s) }) } : null,
@@ -2037,6 +2104,7 @@ function viewItems() {
     ...(showTerminals() ? [
       { label: "Terminal", detail: on(tab === "term"), key: "Ctrl+Alt+T", act: () => toTerminal("term") },
       { label: "Claude's classic terminal", detail: "Claude Code's own, same conversation", act: () => classicTerminal() }] : []),
+    ...(hasPreview() ? [{ label: "Preview", detail: on(tab === "preview"), key: "Ctrl+Alt+O", act: () => deskPreview() }] : []),
     { label: "Changes", detail: on(tab === "changes"), act: () => sideToggle("changes", true) },
     { label: "Details", detail: on(tab === "details"), act: () => sideToggle("details", true) },
     { label: tab ? "Close the side panel" : "Open the side panel", act: () => toggleSide() },
@@ -2073,12 +2141,12 @@ function sessionItems(s) {
   ].filter(Boolean);
 }
 
-// A chat's ⋯: what it shows beside it (Terminal, Changes, Details, each
-// with its key; on, it closes), then what you can do to it.
+// A chat's ⋯: what it shows beside it (Terminal, Preview, Changes, Details,
+// each with its key; on, it closes), then what you can do to it.
 function sessionMenu(s) {
   const tab = desk.current === s.id ? sideTab() : null;
-  const panel = SIDE_TABS.filter(([k]) => k !== "term" || showTerminals()).map(([key, label, keys]) => ({
-    label, icon: { term: "send", changes: "organize", details: "status" }[key], key: keys, detail: tab === key ? "open: closes it" : "",
+  const panel = (desk.current === s.id ? sideTabs() : []).map(([key, label, keys]) => ({
+    label, icon: { term: "send", preview: "pane", changes: "organize", details: "status" }[key], key: keys, detail: tab === key ? "open: closes it" : "",
     act: () => sideToggle(key) }));
   picker({ title: s.task || where(s), items: [...(desk.current === s.id ? panel : []), ...sessionItems(s)] });
 }
@@ -2093,7 +2161,7 @@ function showKeys() {
     ...part("Anywhere, even typing", [["Ctrl+Alt+← / →", "Back to the board / into the chat lit"],
       ["Ctrl+Alt+↑ / ↓", "Chats / Tasks"], ["Ctrl+Alt+H / L", "← / →, as vim's"], ["Ctrl+Alt+J / K", "Chats / Tasks, as the tabs sit"], ["Ctrl+Alt+↵", "New chat"], ["Ctrl+Alt+M", "The menu: everything else, any chat by name"],
       ["Ctrl+Alt+W", "Complete the chat's mission, with Undo"], ["Ctrl+Alt+T", "Its terminal; again, back to the chat"],
-      ["Ctrl+Alt+O", "Open its preview"], ["Ctrl twice  or  Ctrl+Alt+D", "Dictate: hold the second, or tap it and Ctrl again"], ["Ctrl+Alt+/", "These keys"]]),
+      ["Ctrl+Alt+O", "Its preview beside the chat (on the board: open it); again, the chat alone"], ["Ctrl twice  or  Ctrl+Alt+D", "Dictate: hold the second, or tap it and Ctrl again"], ["Ctrl+Alt+/", "These keys"]]),
     ...part("Stop", [["Esc", "Stop Claude, as in Claude Code (on its question: no). Nothing else."]]),
     ...part("On the board", [["j / k  or  ↓ / ↑", "Next / previous card"], ["g / G  or  Home / End", "First / last card"],
       ["l / h  or  → / ←", "Along a card's buttons / back out"], ["Enter", "Open the chat; on a button, press it"],

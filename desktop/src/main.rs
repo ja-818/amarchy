@@ -374,10 +374,16 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
         .visible(false)
         .initialization_script(init_script(omarchy, platform::gpu()))
         .on_navigation(move |u| {
-            if own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") {
+            let o = origin.lock().unwrap().clone();
+            if amarchy_page(o.as_ref(), u) {
                 return true;
             }
-            if origin.lock().unwrap().as_ref().map(|o| o.origin()) == Some(u.origin()) {
+            // A page in one of its frames (a chat's preview beside the chat,
+            // what that page shows in its own): it loads there. On Linux the
+            // window's own loads are told apart (platform::main_frame_only:
+            // one going anywhere else goes to your browser, before amarchy's
+            // page is left); elsewhere only a preview's address is taken.
+            if matches!(u.scheme(), "http" | "https") && (platform::frames() == "any" || o.as_ref().is_some_and(|o| preview_address(o, u))) {
                 return true;
             }
             // Anywhere else (a link in a reply, a sign-in): your browser.
@@ -411,15 +417,18 @@ fn window(app: &AppHandle, hidden: bool) -> tauri::Result<WebviewWindow> {
 
 /// What every page in the window knows before its own scripts run: that it's
 /// the desktop app (window.amarchyDesktop), whether the window is on an
-/// Omarchy desktop (platform::omarchy), and whether it has a GPU to draw with
-/// (platform::gpu: without one, what moves on the page steps half as often).
+/// Omarchy desktop (platform::omarchy), whether it has a GPU to draw with
+/// (platform::gpu: without one, what moves on the page steps half as often),
+/// and what a frame of its may load (platform::frames: a chat's preview
+/// beside the chat; app/preview.js says so for one it can't).
 /// On Omarchy <html> is marked on-omarchy from the start, before the page is
 /// first drawn, so a wallpaper it wouldn't draw (app.css) never flashes.
 fn init_script(omarchy: bool, gpu: bool) -> String {
     let mut js = format!(
-        "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?}, omarchy: {omarchy}, gpu: {gpu} }});",
+        "window.amarchyDesktop = Object.freeze({{ version: {:?}, platform: {:?}, omarchy: {omarchy}, gpu: {gpu}, frames: {:?} }});",
         env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS
+        std::env::consts::OS,
+        platform::frames()
     );
     if omarchy {
         js.push_str(
@@ -440,6 +449,45 @@ fn free_name(dir: &std::path::Path, name: &std::ffi::OsStr) -> std::path::PathBu
     let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
+}
+
+/// One of amarchy's pages, the window's to show: its own (dist/), or one
+/// from the amarchy it opened (origin).
+fn amarchy_page(origin: Option<&Url>, u: &Url) -> bool {
+    own_page(u) || matches!(u.scheme(), "about" | "blob" | "data") || origin.map(|o| o.origin()) == Some(u.origin())
+}
+
+/// Whether u is one of the window's pages (platform::main_frame_only asks):
+/// amarchy's, as the navigation rule has them.
+pub fn window_page(app: &AppHandle, u: &Url) -> bool {
+    let o = app.state::<Shell>().origin.lock().unwrap().clone();
+    amarchy_page(o.as_ref(), u)
+}
+
+/// A chat's preview as amarchy serves it (bin/amarchy: its own machine's
+/// address at the preview's port, over HTTPS on the tailnet): at the host
+/// the window opened, any port; another machine of its tailnet
+/// (<name>.<tailnet>.ts.net); a tailnet's number address (100.64.0.0/10).
+/// What a frame may load where the window's own loads aren't told apart.
+fn preview_address(origin: &Url, u: &Url) -> bool {
+    let (Some(here), Some(there)) = (origin.host_str(), u.host_str()) else { return false };
+    let (here, there) = (here.to_ascii_lowercase(), there.to_ascii_lowercase());
+    if here == there {
+        return true;
+    }
+    if let Some((_, tailnet)) = here.split_once('.') {
+        if tailnet.ends_with(".ts.net") && there.ends_with(&format!(".{tailnet}")) {
+            return true;
+        }
+    }
+    matches!(u.host(), Some(url::Host::Ipv4(ip)) if ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1]))
+}
+
+/// A link out, given as text (a load the window wouldn't take): your browser.
+pub fn outward_str(app: &AppHandle, uri: &str) {
+    if let Ok(u) = Url::parse(uri) {
+        outward(app, &u);
+    }
 }
 
 /// The window's own page (dist/index.html), as the system's web view names it.
@@ -1096,6 +1144,18 @@ fn test_hooks(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_addresses() {
+        let o = Url::parse("https://amarchy.tail1234.ts.net/").unwrap();
+        let yes = |u: &str| preview_address(&o, &Url::parse(u).unwrap());
+        assert!(yes("https://amarchy.tail1234.ts.net:8811/studio/") && yes("https://desk.tail1234.ts.net:5173/"));
+        assert!(yes("http://100.71.198.126:5173/") && yes("http://100.127.0.1/"));
+        assert!(!yes("https://example.com/") && !yes("https://amarchy.tail9999.ts.net:5173/") && !yes("https://tail1234.ts.net.evil.com/"));
+        assert!(!yes("http://100.128.0.1/") && !yes("http://10.0.0.5:5173/"));
+        assert!(amarchy_page(Some(&o), &Url::parse("https://amarchy.tail1234.ts.net/#/s/x").unwrap()));
+        assert!(!amarchy_page(Some(&o), &Url::parse("https://amarchy.tail1234.ts.net:8811/").unwrap()) && !amarchy_page(None, &Url::parse("https://x.y/").unwrap()));
+    }
 
     #[test]
     fn identifier_is_the_configs() {

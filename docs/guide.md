@@ -487,13 +487,15 @@ host's chats without anything else installed.
   keys go to the box: `Enter` stops it, the next `Enter` sends.
 - **Over the chat**, one row of boxes of one height, neutral: **‹** (Back), its
   project and name (click: rename), where it stands (its tone a dot), `⋯` its
-  menu (the side panel's **Terminal** (`Ctrl+Alt+T`), **Changes** and
-  **Details**; rename, pin, a secret…), and **Complete** (its mission: closed, with
+  menu (the side panel's **Terminal** (`Ctrl+Alt+T`), **Preview** (`Ctrl+Alt+O`),
+  **Changes** and **Details**; rename, pin, a secret…), its **Preview** (shown
+  beside it), and **Complete** (its mission: closed, with
   Undo), last. The board's bar is built the same way: the **Ⓐ** a box as ‹ is,
   **New chat** as Complete.
-- **The side panel** has three tabs, a click away (the terminal: `Ctrl+Alt+T`),
-  as wide as you drag its left edge (double-click: back to its width), or the
-  whole window (`⤢`); `✕` closes it. Short of room, the panel lies over the chat.
+- **The side panel** has its tabs a click away (the terminal: `Ctrl+Alt+T`; the
+  preview: `Ctrl+Alt+O`), as wide as you drag its left edge (double-click: back
+  to its width), or the whole window (`⤢`); `✕` closes it. Short of room, the
+  panel lies over the chat.
   - **Terminal**: the chat's own terminal (Run and the saved commands over it), or
     **Claude's classic terminal** (see [Chat and terminal](#chat-and-terminal)).
     Both are the real thing: terminals (xterm.js) attached to the chat's tmux on the
@@ -501,6 +503,8 @@ host's chats without anything else installed.
     mouse wheel (tmux's scrollback), selecting (it copies to your clipboard),
     resizing and the Nerd Font icons work as in a terminal of its own; links open in
     a new tab.
+  - **Preview** (a chat with one): its page, live, beside the chat, so you talk in
+    the chat while you watch it change (see [Preview](#claude-knows-its-in-amarchy)).
   - **Changes**: everything the chat changed, committed or not, new files too,
     against where its branch left its base: a list of the files (New, Edited,
     Deleted, Moved, with their `+`/`−`), then each file's lines, side by side where
@@ -513,7 +517,8 @@ host's chats without anything else installed.
     background sessions and tasks, and the ids. This is where the branch and the
     worktree belong.
 - **Show terminals** (Settings → Terminals) decides whether the Terminal tab shows
-  at all. Off, it's still in the chat's menu under **Advanced**.
+  at all. Off, it's still in the chat's menu under **Advanced**. The Preview is
+  there either way.
 
 It picks the layout by the window: a wide one with a mouse gets the board, a phone
 Today and the chat. Settings can fix it to either (**Layout**), change the
@@ -594,7 +599,7 @@ Four rules, the same in every layout:
 | `Ctrl+Alt+M` | The amarchy menu: everything else (Changes, Details, rename, pin, the look, a new project, Ghostty…), and any chat as you type its name. |
 | `Ctrl+Alt+W` | Complete the chat's mission, with Undo (on the board: the chat lit). |
 | `Ctrl+Alt+T` | The chat's terminal, the keyboard in it; again, back to the chat. |
-| `Ctrl+Alt+O` | Open the chat's preview (of several: its dropdown, to pick one). |
+| `Ctrl+Alt+O` | In a chat: its preview beside it (the one you looked at last; its bar picks another); again, the chat alone. On the board: open the chat lit's preview (of several: its dropdown). |
 | `Ctrl` twice, or `Ctrl+Alt+D` | Dictate into the chat's box (or the new chat's): hold the second `Ctrl` (or `Ctrl+Alt+D`) while you speak, or tap it, and tap `Ctrl` again when you're done. Omarchy's own dictation (`Alt+Space`) types into it too. |
 | `Ctrl+Alt+/` | All the keys (`Ctrl+Alt+?` too). |
 | `Esc` | Stop Claude (on its question: no). |
@@ -904,6 +909,12 @@ window closed.
   app on`: for this computer alone until Tailscale is up, then on your tailnet
   too). `amarchy app off` turns it off, and it stays off.
 - **Links out** (a reply's, a preview's) open in your browser, not in the window.
+  A chat's preview beside the chat loads in its frame (and what that page shows in
+  its own), its links too; one to a new tab opens in your browser. On Linux any
+  page can show there (WebKitGTK tells the window's own page from its frames';
+  the window never leaves amarchy); on macOS and Windows, your tailnet's
+  previews (a deploy's opens in a tab). A desktop app from before this says so
+  until it updates (with amarchy).
 - **Its window's size and place** are kept. On NVIDIA it turns off WebKit's
   DMA-BUF renderer by itself (`WEBKIT_DISABLE_DMABUF_RENDERER=1`). On a
   computer with no GPU to draw with (a new GPU whose Linux driver isn't
@@ -1112,11 +1123,13 @@ amarchy runs the command as a systemd user service of the chat's own
 (`amarchy-preview-<chat>`), outside Claude, so the chat sleeping doesn't stop it;
 capped at 2 GB of memory (`--memory`), and among the first things the kernel kills
 when memory runs out, before any chat. A **Preview** button appears on the chat's
-head and its card, and stays whichever reply you're on:
+head and its card, and stays whichever reply you're on. On the card it opens the
+preview in a tab; over the open chat it shows it **beside the chat** (below), lit
+while it's there, a tap again for the chat alone:
 
 | It says | When | A tap |
 | --- | --- | --- |
-| **Preview** | it answers | opens it |
+| **Preview** | it answers | opens it (over the chat: beside it) |
 | **Start preview** | it isn't running (stopped, the machine restarted) | starts it where you are: the button turns and says **Starting…**, and a toast says when it's ready (a tap on it opens it) |
 | **Starting…** | its service runs, nothing answers yet | its sheet: what it writes as it comes up |
 | **Preview failed** | it stopped with an error | its sheet: what it wrote, **Try again**, **Ask Claude to fix it** |
@@ -1132,6 +1145,25 @@ button would. It turns while one starts and is red when one failed. A tap outsid
 or Esc closes it without pressing anything else; from the keys (`Ctrl+Alt+O`,
 Enter on it) it opens with its first one lit, ↑ ↓ to move, ↵ to open.
 
+**Beside the chat.** Over an open chat, its Preview shows its page in a frame of
+the app's own, so you talk in the chat while you watch the page update: on a
+computer, the side panel's **Preview** tab (half the window until you drag it;
+the chat keeps the rest), on the phone **Chat | Preview** as Chat | Terminal (‹
+back to the chat). Its bar says which one (of several: a picker, the one shown
+checked), with **Reload** and **Open in a tab**. Its page stays loaded while
+you're elsewhere (another tab, another chat, the board) and is as you left it
+when you come back: the last four (two on the phone), each for an hour unseen.
+Not running, it says so with **Start it** (it starts there, **Starting…**, then
+the page); failed, why, with **See why** and **Try again**; nothing answering,
+**Ask Claude to start it**. A page can refuse to be shown inside another's (its
+`X-Frame-Options`, its `Content-Security-Policy: frame-ancestors`): amarchy reads
+its answer first and says so in words, with **Open in a tab** and **Ask Claude to
+allow it** (for the app's address). A plain-http preview with the app on HTTPS
+can't show there either: it says so, and Claude can serve it over HTTPS. The page
+is sandboxed: it can't take the app's window away, its links to a new tab open in
+your browser, and it gets no microphone, camera or location (**Open in a tab** for
+a page that needs them).
+
 The chat's menu has **Preview…** (**Previews…** with several: pick one): its sheet,
 with where it stands (memory, since when), its command and ports, what it wrote, and
 Start, Restart and Stop. Details shows each too, and **Automations** lists every
@@ -1142,7 +1174,8 @@ and the chat sat idle. **Complete** stops it (every one, with several; its `--st
 command too) and checks it's really gone: its service, and every one of its ports free. If something still
 holds one, the chat stays open and says what: **Ask Claude to stop it**, then
 complete it. A preview served elsewhere (a deploy) is an address only:
-`amarchy preview <url>`. `Ctrl+Alt+O` (on the board: the chat lit's) opens it.
+`amarchy preview <url>`. `Ctrl+Alt+O` shows it beside the chat (on the board: the
+chat lit's, in a tab).
 
 Each chat's Claude starts knowing where it is: which chat, worktree and branch it's
 on, where the project's main checkout is, and that the terminal runs the project.

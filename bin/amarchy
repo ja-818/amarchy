@@ -80,7 +80,8 @@ Sessions:
                                         when the chat is completed (with the --stop command, for what it started
                                         elsewhere, like containers), checking its ports (the URL's, and each
                                         --port: an HMR port) are free. Waits until it answers; --no-start saves only.
-                                        Its Preview button opens it, starting it again first when it isn't running.
+                                        Its Preview button opens it (over the chat: beside it, live), starting
+                                        it again first when it isn't running.
                                         On a tailnet with HTTPS, give https://<this machine>.<tailnet>.ts.net:<port>
                                         (or http://localhost:<port>, which comes to that) and listen on 127.0.0.1:
                                         while it runs, amarchy serves the URL's port and each --port there over
@@ -1991,6 +1992,136 @@ def preview_info(s, p, lines=40):
     return out
 
 
+# ---- a preview beside its chat: whether its page lets the app show it
+#
+# The app shows a chat's preview in a frame of its own beside the chat (the
+# side panel's Preview on a computer, Chat | Preview on the phone), so you
+# talk in the chat while you watch it. A page can refuse to be shown inside
+# another's (its X-Frame-Options, its Content-Security-Policy's
+# frame-ancestors): the browser then shows nothing, and says nothing a page
+# can read. So the app asks here first, and says so in so many words, with
+# Open in a tab. Read from its answer as the browser would get it: its
+# server on this machine asked directly (what amarchy serves over HTTPS, on
+# 127.0.0.1), with the Host the browser sends; one served elsewhere (a
+# deploy), at its address; each redirect followed the same way.
+
+PREVIEW_FRAME_WAIT = 4          # seconds its page gets to answer
+
+
+def preview_frame(url, origin, hops=5):
+    """Whether a preview's page (url, as the browser has it) lets a page at
+    origin (the app's: https://box.tail1234.ts.net) show it in a frame:
+    {"frame": True}, {"frame": False, "why": its header, in words}, or
+    {"frame": None, "why": ...} when it didn't answer (the app tries)."""
+    import http.client
+    import ssl
+    at = preview_here(url)
+    for _ in range(hops):
+        try:
+            u = urllib.parse.urlsplit(at)
+            if u.scheme not in ("http", "https") or not u.hostname:
+                return {"frame": None, "why": "not a web address"}
+            where = preview_local(at)
+            path = urllib.parse.urlunsplit(("", "", u.path or "/", u.query, ""))
+            if where and (u.scheme == "http" or preview_fronted(at)):
+                # On this machine: its server itself (amarchy's HTTPS is tailscale serve's, in front of it).
+                c = http.client.HTTPConnection(where[0], where[1], timeout=PREVIEW_FRAME_WAIT)
+            elif u.scheme == "https":
+                c = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=PREVIEW_FRAME_WAIT, context=ssl.create_default_context())
+            else:
+                c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=PREVIEW_FRAME_WAIT)
+            try:
+                c.request("GET", path, headers={"Host": u.netloc.rsplit("@", 1)[-1], "Accept": "text/html,*/*;q=0.8",
+                                                "Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate", "User-Agent": "amarchy"})
+                r = c.getresponse()
+                status, headers = r.status, r.headers
+            finally:
+                c.close()
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            return {"frame": None, "why": f"it didn't answer ({e.__class__.__name__})"}
+        if status in (301, 302, 303, 307, 308) and headers.get("Location"):
+            at = urllib.parse.urljoin(at, headers["Location"])
+            continue
+        why = frame_refusal(headers, at, origin)
+        return {"frame": False, "why": why} if why else {"frame": True}
+    return {"frame": None, "why": "too many redirects"}
+
+
+def frame_refusal(headers, page, origin):
+    """What in a page's answer keeps a page at origin from showing it in a
+    frame, in words ("X-Frame-Options: DENY"), or None: as browsers read it,
+    a Content-Security-Policy's frame-ancestors (each policy sent), and only
+    without one, X-Frame-Options (its ALLOW-FROM ignored, as theirs is)."""
+    ancestors = False
+    for policy in headers.get_all("Content-Security-Policy") or []:
+        for directive in policy.split(";"):
+            words = directive.split()
+            if not words or words[0].lower() != "frame-ancestors":
+                continue
+            ancestors = True
+            sources = words[1:]
+            if not any(csp_source_allows(src, origin, page) for src in sources):
+                return f"its Content-Security-Policy says frame-ancestors {' '.join(sources) or chr(39) + 'none' + chr(39)}"
+            break       # (a policy's first frame-ancestors is the one that counts)
+    if ancestors:
+        return None
+    said = [v.strip() for v in ",".join(headers.get_all("X-Frame-Options") or []).split(",") if v.strip()]
+    if any(v.lower() == "deny" for v in said):
+        return "it sends X-Frame-Options: DENY"
+    if any(v.lower() == "sameorigin" for v in said) and origin_of(page) != origin_of(origin):
+        return "it sends X-Frame-Options: SAMEORIGIN"
+    return None
+
+
+def origin_of(url):
+    """scheme://host[:port], its port only when it isn't the scheme's own."""
+    u = urllib.parse.urlsplit(url)
+    port = u.port
+    default = {"http": 80, "https": 443}.get(u.scheme)
+    return f"{u.scheme}://{(u.hostname or '').lower()}{f':{port}' if port and port != default else ''}"
+
+
+def csp_source_allows(src, origin, page):
+    """Whether one of frame-ancestors' sources takes origin (CSP 3's
+    matching: 'self', *, a scheme, a host with its * and its port)."""
+    s = src.strip()
+    low = s.lower()
+    o = urllib.parse.urlsplit(origin)
+    scheme, host = o.scheme, (o.hostname or "").lower()
+    port = o.port or {"http": 80, "https": 443}.get(scheme)
+    if low == "'none'":
+        return False
+    if low == "'self'":
+        return origin_of(page) == origin_of(origin)
+    if low == "*":
+        return scheme in ("http", "https")
+    if re.fullmatch(r"[a-z][a-z0-9+.-]*:", low):
+        want = low[:-1]
+        return scheme == want or (want == "http" and scheme == "https")
+    m = re.fullmatch(r"(?:([a-z][a-z0-9+.-]*)://)?(\*|\*\.[^:/]+|[^:/*]+)(?::(\d+|\*))?(?:/.*)?", low)
+    if not m:
+        return False
+    want, h, p = m.groups()
+    page_scheme = urllib.parse.urlsplit(page).scheme
+    if want:
+        if not (scheme == want or (want == "http" and scheme == "https")):
+            return False
+    elif not (scheme == page_scheme or (page_scheme == "http" and scheme == "https")):
+        return False
+    if h == "*":
+        pass
+    elif h.startswith("*."):
+        if not host.endswith(h[1:]):
+            return False
+    elif host != h:
+        return False
+    if p == "*":
+        return True
+    if p:
+        return port == int(p)
+    return port == {"http": 80, "https": 443}.get(scheme)
+
+
 def preview_pick(s, key=None):
     """One of a chat's previews by its key (the app's), the first with none
     given; None when there's no such one."""
@@ -2324,7 +2455,7 @@ def preview_command(sid, opts, ports, flags, args, unlock):
             again = f" --name {shlex.quote(new['name'])}" if len(ps) > 1 and new.get("name") else ""
             return fail(f"Saved, but {why}" + (f"\n{at}" if at else "") + (f"\nIts log ends:\n{log}" if log else "") +
                         f"\nFix it, then: amarchy preview restart{again}")
-        print(f"Up at {url}: its Preview button opens it, and starts it again whenever it isn't running." + also)
+        print(f"Up at {url}: its Preview button shows it beside the chat, and starts it again whenever it isn't running." + also)
         if renamed:
             print(renamed)
         if moved:
@@ -5987,6 +6118,9 @@ def agent_context(s):
                  f"on the Preview button (which starts it again when it isn't running), and stops it when the chat "
                  f"is completed. Two or more to look at (an app and its admin, a storybook): give each a name, "
                  f"`--name <what it is>`, and the button is Previews, a list to pick from. "
+                 f"The app shows it beside this chat, in a frame, so they watch it while they talk to you: "
+                 f"don't have its page refuse that (X-Frame-Options, or a frame-ancestors without "
+                 f"https://{tls}{'' if app_https() == 443 else f':{app_https()}'}). "
                  f"Don't leave a dev server in your background shells: it stops when the chat sleeps. ")
     elif bind:
         text += (f"For them to open something you serve (a dev server, a preview), listen on {bind} "
@@ -8550,8 +8684,11 @@ APP_CONTACT = "https://github.com/ja-818/amarchy"
 APP_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
              ".js": "text/javascript; charset=utf-8", ".webmanifest": "application/manifest+json",
              ".svg": "image/svg+xml", ".png": "image/png"}
+# Its frames: a chat's preview beside the chat (its own address, anywhere: a
+# tailnet's, a deploy's; a frame of the app's own pages, none). The app itself
+# is in no one's frame.
 APP_CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; "
-           "connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; "
+           "connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-src https: http:; frame-ancestors 'none'; "
            "base-uri 'none'; form-action 'none'")
 APP_CHUNK = 1_500_000           # bytes of a transcript read at a time (the latest first, earlier on request)
 APP_KEYS = {"Enter", "Escape", "Up", "Down", "Left", "Right", "Tab", "BTab", "Space", "BSpace",
@@ -23164,6 +23301,18 @@ def app_handler(st, users, address):
                 if not found:
                     return self.error(404, f"no picture or video there ({kind})")
                 return self.send_media(found, kind, cache)
+            m = re.fullmatch(r"/api/session/([^/]+)/preview/frame", path)
+            if m:       # whether one of a chat's previews lets the app show it beside the chat: ?key=&origin=<the app's>
+                s = self.session(m.group(1))
+                if not s:
+                    return
+                p = preview_pick(s, args["key"][0] if "key" in args else None)
+                if not p:
+                    return self.error(404, "This chat has no such preview" if "key" in args else "This chat has no preview")
+                origin = (args.get("origin") or [""])[0]
+                if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?", origin):
+                    return self.error(400, "origin: the app's own, as scheme://host[:port]")
+                return self.send(200, {**preview_frame(p["url"], origin), "url": p["url"], "key": p["key"]})
             m = re.fullmatch(r"/api/session/([^/]+)/preview", path)
             if m:       # one of a chat's previews, whole (its sheet): ?key=<its key>, else its first
                 s = self.session(m.group(1))

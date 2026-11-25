@@ -12,7 +12,9 @@
 // card and over the chat), each doing what its own button would; a tap
 // outside closes it and presses nothing else, Esc too (the chat stays open);
 // the keys open it and move in it; the chat's menu picks one to manage;
-// Complete says it stops them all. With screenshots.
+// Complete says it stops them all. Over the open chat, its Preview shows it
+// beside the chat instead (test/preview-pane-view.js has all of that), and
+// Ctrl+Alt+O there too. With screenshots.
 //
 //   node test/preview-view.js          both layouts
 //   node test/preview-view.js phone    one layout (phone | wide)
@@ -256,7 +258,11 @@ async function run(browser, port, layout) {
   check(layout, await until(p, () => [...document.querySelectorAll(".head-btns .ui-preview")].some((b) => b.offsetParent)), "over the open chat too");
   await p.evaluate(() => { window.__opened.length = 0; });
   await p.evaluate(() => [...document.querySelectorAll(".head-btns .ui-preview")].find((b) => b.offsetParent).click());
-  check(layout, await until(p, (u) => window.__opened.includes(u), URL_UP), "a tap there opens it");
+  const beside = () => p.evaluate(() => [...document.querySelectorAll(".preview-pane")].some((x) => !x.hidden && x.getClientRects().length));
+  check(layout, await until(p, () => [...document.querySelectorAll(".preview-pane")].some((x) => !x.hidden && x.getClientRects().length)) && await p.evaluate(() => !window.__opened.length),
+        "a tap there shows it beside the chat (not in a tab)");
+  await p.evaluate(() => [...document.querySelectorAll(".head-btns .ui-preview")].find((b) => b.offsetParent).click());
+  check(layout, await until(p, () => ![...document.querySelectorAll(".preview-pane")].some((x) => !x.hidden && x.getClientRects().length)), "a tap again: the chat alone");
   // Starting: it turns there too, in the same place.
   await stands("starting", "proj-fresh");
   check(layout, await until(p, () => { const b = [...document.querySelectorAll(".head-btns .ui-preview")].find((b) => b.offsetParent); return b && !!b.querySelector(".spinner") && b.getAttribute("aria-label") === "Starting…"; }),
@@ -285,11 +291,14 @@ async function run(browser, port, layout) {
   if (layout === "wide") {
     await p.evaluate(() => { window.__opened.length = 0; });
     await p.keyboard.press("Control+Alt+KeyO");
-    check(layout, await until(p, (u) => window.__opened.includes(u), URL_UP), "Ctrl+Alt+O opens it");
+    check(layout, await until(p, () => !document.querySelector(".sidepanel .preview-pane").hidden) && await beside() && await p.evaluate(() => !window.__opened.length),
+          "Ctrl+Alt+O shows it beside the chat");
+    await p.keyboard.press("Control+Alt+KeyO");
+    check(layout, await until(p, () => !document.querySelector(".desk-root").classList.contains("side-open")), "and again, the chat alone");
     await p.evaluate(() => deskMenu());
     await until(p, () => !!document.querySelector(".picker"));
     const items = await p.evaluate(() => document.querySelector(".picker").innerText);
-    check(layout, /Open the preview/.test(items) && !/(^|\n)Run(\n|$)/.test(items), "the Amarchy menu: the preview, no Run");
+    check(layout, /Show the preview/.test(items) && !/(^|\n)Run(\n|$)/.test(items), "the Amarchy menu: the preview, no Run");
     await p.keyboard.press("Escape");
     await p.evaluate(() => sessionMenu(rowOf("proj-fresh")));
     await until(p, () => !!document.querySelector(".picker"));
@@ -328,8 +337,10 @@ async function run(browser, port, layout) {
         "Esc closes it, and the chat stays open");
   if (layout === "wide") {
     await p.keyboard.press("Control+Alt+KeyO");
-    check(layout, await until(p, () => document.querySelector(".ui-dropdown") && document.activeElement.matches(".ui-drop-row")), "Ctrl+Alt+O: its dropdown, from the keys");
-    await p.keyboard.press("Escape");
+    check(layout, await until(p, () => !document.querySelector(".sidepanel .preview-pane").hidden && /App/.test(document.querySelector(".sidepanel .preview-which").innerText)),
+          "Ctrl+Alt+O: beside the chat, the first (its bar picks another)");
+    await p.keyboard.press("Control+Alt+KeyO");
+    await until(p, () => !document.querySelector(".desk-root").classList.contains("side-open"));
     await p.evaluate(() => sessionMenu(rowOf("proj-done")));
     await until(p, () => !!document.querySelector(".picker"));
     check(layout, await p.evaluate(() => [...document.querySelectorAll(".picker-row")].some((r) => /^Previews/.test(r.innerText) && r.querySelector(".chev"))), "the chat's menu: Previews ›");

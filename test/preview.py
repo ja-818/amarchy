@@ -150,6 +150,86 @@ check(not am.serve_reminder(bash("pnpm test", True)) and not am.serve_reminder(b
       "a test run, or a server in the foreground: nothing said")
 check(not am.serve_reminder(bash("amarchy preview --run 'pnpm dev' http://box:5180")), "registering it: nothing said")
 
+# ---- beside its chat: whether its page lets the app show it in a frame
+# (its X-Frame-Options, its frame-ancestors), read from its answer as the
+# browser would get it: its server here asked directly, each redirect followed.
+import http.server, threading
+from email.message import Message
+class Pages(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        say = {"/plain": [], "/deny": [("X-Frame-Options", "DENY")], "/same": [("X-Frame-Options", "SAMEORIGIN")],
+               "/allowfrom": [("X-Frame-Options", "ALLOW-FROM https://box.tail1234.ts.net")],
+               "/none": [("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")],
+               "/self": [("Content-Security-Policy", "frame-ancestors 'self'")],
+               "/app": [("Content-Security-Policy", "frame-ancestors 'self' https://box.tail1234.ts.net")],
+               "/wild": [("Content-Security-Policy", "frame-ancestors https://*.tail1234.ts.net:*"), ("X-Frame-Options", "DENY")],
+               "/two": [("Content-Security-Policy", "frame-ancestors *"), ("Content-Security-Policy", "frame-ancestors 'self'")],
+               "/report": [("Content-Security-Policy-Report-Only", "frame-ancestors 'none'")],
+               "/go": [("Location", "/deny")], "/away": [("Location", "/plain?x=1")]}.get(self.path.split("?")[0], [])
+        self.send_response(302 if self.path in ("/go", "/away") else 200)
+        for k, v in say:
+            self.send_header(k, v)
+        self.send_header("X-Host-Seen", self.headers.get("Host", ""))
+        self.end_headers()
+pages = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Pages)
+threading.Thread(target=pages.serve_forever, daemon=True).start()
+pp = pages.server_address[1]
+APP_ORIGIN = "https://box.tail1234.ts.net"
+fr = lambda path, origin=APP_ORIGIN: am.preview_frame(f"http://box:{pp}{path}", origin)
+check(fr("/plain") == {"frame": True}, "a page that says nothing: it shows")
+check(fr("/deny")["frame"] is False and "X-Frame-Options: DENY" in fr("/deny")["why"], "X-Frame-Options: DENY: it won't, and says why")
+check(fr("/same")["frame"] is False and "SAMEORIGIN" in fr("/same")["why"], "SAMEORIGIN: not for the app's address (another port is another origin)")
+check(fr("/allowfrom") == {"frame": True}, "ALLOW-FROM: ignored, as browsers do")
+check(fr("/none")["frame"] is False and "frame-ancestors 'none'" in fr("/none")["why"], "frame-ancestors 'none': it won't")
+check(fr("/self")["frame"] is False, "frame-ancestors 'self': not the app (another origin)")
+check(fr("/app") == {"frame": True} and fr("/app", "https://other.tail1234.ts.net")["frame"] is False, "frame-ancestors naming the app: it shows there, not elsewhere")
+check(fr("/wild") == {"frame": True} and fr("/wild", "https://box.tail1234.ts.net:8443")["frame"] is True
+      and fr("/wild", "http://box.tail1234.ts.net")["frame"] is False and fr("/wild", "https://box.example.com")["frame"] is False,
+      "a wildcard host and port (its scheme's only); with frame-ancestors, X-Frame-Options is ignored")
+check(fr("/two")["frame"] is False, "two policies: each must allow it")
+check(fr("/report") == {"frame": True}, "report-only: nothing enforced")
+check(fr("/go")["frame"] is False and fr("/away") == {"frame": True}, "a redirect followed: the page it lands on says")
+check(am.preview_frame("http://box:1/", APP_ORIGIN)["frame"] is None, "nothing answering: unknown (the app tries)")
+m = Message(); m["Content-Security-Policy"] = "frame-ancestors https: 'self'"
+check(am.frame_refusal(m, "http://box:5/", "https://x.y") is None and am.frame_refusal(m, "http://box:5/", "http://x.y") is not None,
+      "a scheme source: https: takes an HTTPS app, not a plain one")
+m = Message(); m["Content-Security-Policy"] = "frame-ancestors box.tail1234.ts.net"
+check(am.frame_refusal(m, "https://box.tail1234.ts.net:5180/", APP_ORIGIN) is None and am.frame_refusal(m, "https://box.tail1234.ts.net:5180/", APP_ORIGIN + ":8443") is not None,
+      "a host without a port: its scheme's own port only")
+check(am.csp_source_allows("*.tail1234.ts.net", APP_ORIGIN, "https://p/") and not am.csp_source_allows("*.tail1234.ts.net", "https://tail1234.ts.net", "https://p/"),
+      "*.host: its subdomains, not itself")
+
+# The app asks it at GET /api/session/<id>/preview/frame?key=&origin=: the chat's own preview, nothing else.
+st = am.AppState(); st.transcriber = None
+Handler = am.app_handler(st, ["tester@test"], "127.0.0.1")
+class AsYou(Handler):
+    def parse_request(self):
+        ok = super().parse_request()
+        if ok and not self.headers.get("Tailscale-User-Login"):
+            self.headers["Tailscale-User-Login"] = "tester@test"
+        return ok
+appsrv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), AsYou)
+threading.Thread(target=appsrv.serve_forever, daemon=True).start()
+import urllib.request, urllib.error
+def ask(q):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{appsrv.server_address[1]}/api/session/p-f/preview/frame{q}", timeout=10) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+am.save_session({"id": "p-f", "repo": "p", "name": "f", "branch": "f", "base": "main", "path": home,
+                 "previews": [{"url": f"http://box:{pp}/plain"}, {"url": f"http://box:{pp}/deny", "name": "Admin", "key": "admin"}]})
+o = urllib.parse.quote(APP_ORIGIN, safe="")
+code, d = ask(f"?key=&origin={o}")
+check(code == 200 and d.get("frame") is True and d.get("url", "").endswith("/plain"), f"the app asks: its first, it shows ({code} {d})")
+code, d = ask(f"?key=admin&origin={o}")
+check(code == 200 and d.get("frame") is False and "DENY" in d.get("why", "") and d.get("key") == "admin", "by its key: the one that won't, and why")
+check(ask(f"?key=nope&origin={o}")[0] == 404, "a key it hasn't: 404")
+check(ask("?key=&origin=javascript:alert(1)")[0] == 400 and ask("?key=")[0] == 400, "an origin that isn't one: refused")
+check("frame-src https: http:" in am.APP_CSP and "frame-ancestors 'none'" in am.APP_CSP, "the app's own policy lets it frame a preview, and no one frame the app")
+appsrv.shutdown(); pages.shutdown()
+
 # ---- a registered one, for real
 import subprocess, shutil
 def free_port():

@@ -52,7 +52,8 @@ else:       # run by hand: a home of its own, gone when it stops (test/homes.py)
     home = homes.home("desktop-server")
 LOCAL, CHATS = "--local" in flags, "--no-chats" not in flags
 PREVIEW = "--preview" in flags
-PREVIEW_URL, DOCS_URL = "https://preview.example:4631/", "https://docs.example/page"
+# (Its preview a page the test serves, for its frame beside the chat: AMARCHY_TEST_PREVIEW_URL.)
+PREVIEW_URL, DOCS_URL = os.environ.get("AMARCHY_TEST_PREVIEW_URL") or "https://preview.example:4631/", "https://docs.example/page"
 # --address=<name>: the name it's asked for at (a tailnet name, reached through a proxy).
 ADDRESS = next((f.split("=", 1)[1] for f in flags if f.startswith("--address=")), "127.0.0.1")
 os.makedirs(home, exist_ok=True)
