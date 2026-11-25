@@ -21,8 +21,9 @@ It's built out of Omarchy's own parts, and changes none of Omarchy's files:
 - **The Ⓐ in the bar**: a shell plugin (Quickshell, `omarchy plugin` rules,
   its strings in `i18n/`) that lights up when a chat needs you and says how
   many. It follows amarchy's events; it never polls.
-- **Super + D**: one key in Omarchy's Lua bindings (a free one, a
-  setting), through `o.bind`. A row in the Omarchy menu, through the user's
+- **Super + Shift + R**: one key in Omarchy's Lua bindings (a free one, on
+  the Super + Shift and a letter Omarchy opens its apps with; a setting),
+  through `o.bind`. A row in the Omarchy menu, through the user's
   `omarchy-menu.jsonc`.
 - **The theme live**: "Omarchy (live)" is amarchy's look made from the
   desktop's current theme (its `colors.toml`, its `shell.toml`, Hyprland's
@@ -86,7 +87,7 @@ echo "Opening amarchy..."
 setsid uwsm-app -- /usr/bin/amarchy-desktop >/dev/null 2>&1 &
 
 echo ""
-echo "amarchy has been installed. Super+D brings it up; the Ⓐ in the bar lights up when a chat needs you."
+echo "amarchy has been installed. Super+Shift+R brings it up; the Ⓐ in the bar lights up when a chat needs you."
 ```
 
 ```jsonc

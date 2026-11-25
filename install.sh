@@ -22,7 +22,7 @@
 #     wallpapers smaller for the app (amarchy theme --cut: kept in
 #     ~/.local/state/amarchy/cuts)
 #   - on an Omarchy desktop (Omarchy 4), omarchy/install.sh: the Ⓐ in the
-#     bar, Super+D and Amarchy in the Omarchy menu; elsewhere, it takes
+#     bar, Super+Shift+R and Amarchy in the Omarchy menu; elsewhere, it takes
 #     away what an amarchy from before left there. Brings the state of an
 #     amarchy from before up to date (amarchy migrate)
 #   - on a computer with a desktop (Omarchy, or any Wayland or X session):

@@ -270,7 +270,7 @@ and tell the other tracks.
 ### Omarchy: the bar, the key, the theme live
 
 - **`amarchy open [<id> | <machine>/<id> | amarchy://chat/<machine>/<id>]`**
-  is what the Ⓐ in the bar, the key (Super+D; amarchy key) and the Omarchy menu run: the window of
+  is what the Ⓐ in the bar, the key (Super+Shift+R; amarchy key) and the Omarchy menu run: the window of
   class `amarchy` to the front (Hyprland), else `amarchy-desktop [link]`
   started; without the desktop app, the board in a browser window at the
   chat, by the routes below. It finds the board in the desktop app's order.

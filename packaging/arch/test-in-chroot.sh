@@ -91,7 +91,7 @@ check "after a new package: set up again" "$(grep -q 'set up again for amarchy-g
 check "and remembered" "$(as_user 'cat ~/.local/state/amarchy/setup-version' | grep -qx 0000000new01 && echo ok)"
 
 out=$(as_user 'amarchy theme --list 2>&1 | head -3; amarchy key 2>&1')
-check "themes and the key, from the package" "$(grep -q 'Super+D brings amarchy to the front' <<<"$out" && grep -q 'catppuccin' <<<"$out" && echo ok)" "$out"
+check "themes and the key, from the package" "$(grep -q 'Super+Shift+R brings amarchy to the front' <<<"$out" && grep -q 'catppuccin' <<<"$out" && echo ok)" "$out"
 
 # Dictation's engine: with the package, nothing to fetch but the model.
 eng=/usr/lib/amarchy/transcribe.cpp

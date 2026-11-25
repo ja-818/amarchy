@@ -3,10 +3,11 @@
 
 - omarchy/hypr/amarchy.lua, run by Lua with a stand-in for Omarchy's `o` and
   Hyprland's `hl` (each logs what it's asked, as Omarchy's own bindings left
-  them: Super+Shift+A its AI key): Super+D by default, Omarchy's keys
-  left alone; a key you picked (amarchy key) takes the chord, whatever was
+  them: Super+Shift+A its AI key): Super+Shift+R by default, Omarchy's
+  keys left alone; a key you picked (amarchy key) takes the chord, whatever was
   there giving way; off: no key; a setting that isn't a chord: the default;
-  outside Omarchy's config: nothing.
+  outside Omarchy's config: nothing. The default is the same in the Lua file,
+  the CLI and the installer, and Omarchy's own bindings leave it free.
 - `amarchy key`: says the key; sets one as you'd type it (Super+Ctrl+M),
   refuses what isn't one; off; default; Hyprland reloaded when it runs.
 - The Omarchy menu's entry shows the key under it, and follows it
@@ -74,8 +75,12 @@ def lua_test(base):
         return (r.stdout + r.stderr).strip().splitlines()
     bin_ = f"'{home}/.local/bin/amarchy' open"
     out = run()
-    check("default: Super+D, Omarchy's keys left alone", out == [
-        f"bind SUPER + D | Amarchy | {bin_}",
+    check("default: Super+Shift+R, Omarchy's keys left alone", out == [
+        f"bind SUPER + SHIFT + R | Amarchy | {bin_}",
+        "now: SUPER + A=Select all, SUPER + SHIFT + A=AI, SUPER + SHIFT + R=Amarchy"], out)
+    out = run("SUPER + D")
+    check("the default from before (Super+D), picked: that one", out == [
+        "unbind SUPER + D", f"bind SUPER + D | Amarchy | {bin_}",
         "now: SUPER + A=Select all, SUPER + D=Amarchy, SUPER + SHIFT + A=AI"], out)
     out = run("SUPER + CTRL + M")
     check("a key picked: that one", out[-1] == "now: SUPER + A=Select all, SUPER + CTRL + M=Amarchy, SUPER + SHIFT + A=AI"
@@ -87,7 +92,7 @@ def lua_test(base):
     out = run("off")
     check("off: no key, Omarchy's left alone", out == ["now: SUPER + A=Select all, SUPER + SHIFT + A=AI"], out)
     out = run("SUPER + A\"); os.execute(\"touch /tmp/x")
-    check("a setting that isn't a chord: the default", out[-1].startswith("now:") and "SUPER + D=Amarchy" in out[-1]
+    check("a setting that isn't a chord: the default", out[-1].startswith("now:") and "SUPER + SHIFT + R=Amarchy" in out[-1]
           and "SUPER + A=Select all" in out[-1], out)
     out = run(None, "no-omarchy")
     check("outside Omarchy's config: nothing bound", out == ["now: SUPER + A=Select all, SUPER + SHIFT + A=AI"], out)
@@ -111,7 +116,8 @@ def cli_test(base):
         return r.returncode, (r.stdout + r.stderr).strip()
     setting = home / "config/amarchy/key"
     code, out = key()
-    check("says the key: Super+D, the default", code == 0 and out.startswith("Super+D brings amarchy to the front (the default)"), out)
+    check("says the key: Super+Shift+R, the default",
+          code == 0 and out.startswith("Super+Shift+R brings amarchy to the front (the default)"), out)
     code, out = key("Super+Ctrl+M")
     check("sets one as you'd type it", code == 0 and setting.read_text() == "SUPER + CTRL + M\n"
           and out.startswith("Super+Ctrl+M brings amarchy to the front, in place of anything Omarchy had there"), out)
@@ -123,44 +129,65 @@ def cli_test(base):
     check("off", code == 0 and setting.read_text() == "off\n" and out.startswith("No key brings amarchy"), out)
     code, out = key("default")
     check("default: the setting gone", code == 0 and not setting.exists() and "(the default)" in out, out)
-    code, out = key("super d")
+    code, out = key("super shift r")
     check("the default typed out: no setting kept", code == 0 and not setting.exists(), out)
+    code, out = key("Super+D")
+    check("the default from before, typed: kept as your key", code == 0 and setting.read_text() == "SUPER + D\n"
+          and out.startswith("Super+D brings amarchy to the front, in place of"), out)
+    key("default")
 
     # What else this machine's Hyprland has on the key (hyprctl binds).
     binds = home / "binds.json"
     binds.write_text(json.dumps([
-        {"modmask": 64, "key": "D", "keycode": 0, "submap": "", "description": "Amarchy", "dispatcher": "exec",
+        {"modmask": 65, "key": "R", "keycode": 0, "submap": "", "description": "Amarchy", "dispatcher": "exec",
          "arg": "'/home/x/.local/bin/amarchy' open"},
-        {"modmask": 65, "key": "D", "keycode": 0, "submap": "", "description": "Docker", "dispatcher": "exec", "arg": "x"}]))
+        {"modmask": 64, "key": "R", "keycode": 0, "submap": "", "description": "Run", "dispatcher": "exec", "arg": "x"},
+        {"modmask": 69, "key": "R", "keycode": 0, "submap": "", "description": "Clear reminders", "dispatcher": "exec",
+         "arg": "x"}]))
     code, out = key()
-    check("only amarchy's on Super+D (another chord is another key): nothing said", "something else" not in out, out)
+    check("only amarchy's on Super+Shift+R (another chord is another key): nothing said", "something else" not in out, out)
     code, out = key("--check")
     check("--check: nothing to say", code == 0 and out == "", out)
     binds.write_text(json.dumps([
-        {"modmask": 64, "key": "d", "keycode": 0, "submap": "", "description": "My dictation", "dispatcher": "exec",
-         "arg": "voxtype record toggle"},
-        {"modmask": 64, "key": "D", "keycode": 0, "submap": "resize", "description": "In a submap", "dispatcher": "x", "arg": ""}]))
+        {"modmask": 65, "key": "r", "keycode": 0, "submap": "", "description": "SSH", "dispatcher": "exec",
+         "arg": "xdg-terminal-exec -e ssh your-server"},
+        {"modmask": 65, "key": "R", "keycode": 0, "submap": "resize", "description": "In a submap", "dispatcher": "x", "arg": ""}]))
     code, out = key()
-    check("Super+D taken by your own binding: said, with how to pick another",
-          "But this machine's Hyprland has something else on Super+D too: My dictation. Pick another key" in out, out)
+    check("Super+Shift+R taken by your own binding (Omarchy's example of one): said, with how to pick another",
+          "But this machine's Hyprland has something else on Super+Shift+R too: SSH. Pick another key" in out, out)
     code, out = key("--check")
-    check("--check: says it", code == 0 and out == "Super+D is also bound here: My dictation. Another key: amarchy key <keys>", out)
+    check("--check: says it", code == 0 and out == "Super+Shift+R is also bound here: SSH. Another key: amarchy key <keys>", out)
     binds.unlink()
 
 
-def omarchy_free_test():
+def default_test():
+    """One default, wherever it's written: the Lua file binds it, the CLI says
+    it, the installer puts it in the Omarchy menu's hint."""
+    import re as re_
+    lua = re_.search(r'local key, picked = "([^"]+)", false', (REPO / "omarchy/hypr/amarchy.lua").read_text())
+    cli = re_.search(r'(?m)^OMARCHY_KEY_DEFAULT = "([^"]+)"', (REPO / "bin/amarchy").read_text())
+    sh = re_.search(r'else "([A-Z +]+)"', (REPO / "omarchy/install.sh").read_text())
+    said = [m.group(1) if m else None for m in (lua, cli, sh)]
+    check("one default: amarchy.lua, amarchy key and install.sh agree", said == ["SUPER + SHIFT + R"] * 3, said)
+    return said[1]
+
+
+def omarchy_free_test(default):
     """Omarchy's own bindings (its defaults, every region's, the user file it
-    ships) leave the default free."""
+    ships) leave the default free. (The user file only has it in a comment,
+    as its example of a key of your own: amarchy key says so when you made
+    it yours.)"""
     if not (SRC / "default/hypr/bindings").is_dir():
         print(f"skip: no Omarchy checkout in {SRC}")
         return
     import re as re_
     found = []
     for f in [*(SRC / "default/hypr").rglob("*.lua"), *(SRC / "config/hypr").rglob("*.lua")]:
-        for m in re_.finditer(r'"(SUPER(?: \+ [A-Z]+)*)"', f.read_text()):
-            if m.group(1) in ("SUPER + D",):
+        code = "\n".join(re_.sub(r"--.*$", "", line) for line in f.read_text().splitlines())
+        for m in re_.finditer(r'"(SUPER(?: \+ [A-Z]+)*)"', code):
+            if m.group(1) == default:
                 found.append(f"{f.relative_to(SRC)}: {m.group(1)}")
-    check("Omarchy's own bindings leave Super+D free", not found, found)
+    check(f"Omarchy's own bindings leave {default} free", not found, found)
 
 
 def menu_test(base):
@@ -185,7 +212,7 @@ def menu_test(base):
         line = next((l for l in t.splitlines() if '"amarchy":' in l), "")
         return json.loads(line.split(":", 1)[1].strip().rstrip(",")).get("description", "") if line else ""
     subprocess.run([str(REPO / "omarchy/install.sh")], env=env, capture_output=True, text=True)
-    check("the menu's entry shows the key", hint() == "Your chats · Super+D. Stop babysitting your agents.", hint())
+    check("the menu's entry shows the key", hint() == "Your chats · Super+Shift+R. Stop babysitting your agents.", hint())
     (home / ".config/amarchy").mkdir(parents=True, exist_ok=True)
     (home / ".config/amarchy/key").write_text("SUPER + CTRL + M\n")
     r = subprocess.run([str(REPO / "omarchy/install.sh"), "--menu"], env=env, capture_output=True, text=True)
@@ -200,7 +227,7 @@ def main():
     base = homes.home("omarchy-key")
     try:
         lua_test(base)
-        omarchy_free_test()
+        omarchy_free_test(default_test())
         cli_test(base)
         menu_test(base)
     finally:

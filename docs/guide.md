@@ -879,8 +879,8 @@ window closed.
   in, its window says so, with **Sign in to Tailscale** (Tailscale's own page,
   in your browser), and goes on by itself once you have.
 - **Links**: `amarchy-desktop amarchy://chat/<machine>/<id>` opens that chat,
-  in the window already open (there's only ever one). The bar's Ⓐ, Super + D
-  and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
+  in the window already open (there's only ever one). The bar's Ⓐ, Super +
+  Shift + R and the Omarchy menu open it this way ([On Omarchy](#on-omarchy)).
 - **Notifications**: the same ones your phone gets (what **Tell me** in
   Settings says), as your desktop's own, window open or closed. A chat that asks
   for a permission has **Allow** and **Deny** on its notification, a question its
@@ -942,13 +942,16 @@ a backup of each file it changes).
   `amarchy.chats`, put at the end of the bar's left side the first time; move
   it or take it off like any widget (Setup › Plugins, or drag it), and an
   update leaves it where you put it.
-- **Super + D** brings amarchy to the front: the desktop app's window if it has
-  one, else the app started. Omarchy leaves it free, and one hand reaches it.
+- **Super + Shift + R** brings amarchy to the front: the desktop app's window
+  if it has one, else the app started. Super + Shift and a letter is how
+  Omarchy opens its apps; Omarchy leaves R free, and one hand reaches it.
   It's a setting: `amarchy key Super+Ctrl+M` picks another (one Omarchy uses
   gives way to amarchy while it's picked), `amarchy key off` none, `amarchy key
-  default` Super + D again; it changes at once. `amarchy key` (and the install)
-  says when this machine's Hyprland has something else on it, your own bindings
-  say. A machine that never picked a key follows the default when it changes.
+  default` Super + Shift + R again; it changes at once. `amarchy key` (and the
+  install) says when this machine's Hyprland has something else on it, your
+  own bindings say. A machine that never picked a key follows the default when
+  it changes (until 2026-11-25 it was Super + D: `amarchy key Super+D` keeps
+  that one).
 - **Amarchy in the Omarchy menu** (Super + Space) does the same, with the key
   under it.
 
@@ -2036,7 +2039,7 @@ amarchy theme --omarchy [--force]     make "Omarchy (live)" from the desktop's l
 amarchy awake [on|off] [--json]       whether idle sleep is held off for the chats working here; off stops it
 amarchy tailscale [--json] [--no-open]   Tailscale here, step by step: install, sign in, MagicDNS, HTTPS
 amarchy ghostty [<id>] [term|claude]  a chat of this machine's in a Ghostty window (tmux attached to it)
-amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+D)
+amarchy key [<keys>|off|default]      the key that brings amarchy to the front on Omarchy (Super+Shift+R)
 amarchy tailscale switch [<account>]  the accounts signed in here, or switch to one
 
 Look and sound:

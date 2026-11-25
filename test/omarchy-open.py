@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`amarchy open`: what Super+D, the Omarchy menu and the Ⓐ in the bar
+"""`amarchy open`: what Super+Shift+R, the Omarchy menu and the Ⓐ in the bar
 run. With fakes of Hyprland (hyprctl), uwsm-app, the desktop app and
 Omarchy's web-app launchers, each logging what it's asked:
 

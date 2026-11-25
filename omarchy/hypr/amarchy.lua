@@ -6,7 +6,8 @@
 --
 -- One key brings amarchy to the front (`amarchy open`: the desktop app's
 -- window, or the app started; without the desktop app, your chats in a
--- browser window): Super + D, which Omarchy leaves free (amarchy key says
+-- browser window): Super + Shift + R, which Omarchy leaves free, on the
+-- Super + Shift + a letter Omarchy opens its apps with (amarchy key says
 -- when this machine's Hyprland has something else there).
 --
 -- The key is a setting, `amarchy key`, kept in ~/.config/amarchy/key (a
@@ -32,7 +33,7 @@ if config == nil or config == "" then
   config = home .. "/.config"
 end
 
-local key, picked = "SUPER + D", false
+local key, picked = "SUPER + SHIFT + R", false
 local setting = io.open(config .. "/amarchy/key")
 if setting then
   local said = (setting:read("*l") or ""):gsub("^%s+", ""):gsub("%s+$", "")

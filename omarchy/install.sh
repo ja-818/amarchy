@@ -6,7 +6,7 @@
 #   - the Ⓐ in the bar: the shell plugin amarchy.chats (omarchy/plugin),
 #     linked into ~/.config/omarchy/plugins and put on the bar the first
 #     time (where you move it, or whether you take it off, is yours after)
-#   - the key, Super+D unless `amarchy key` says another (or off), and
+#   - the key, Super+Shift+R unless `amarchy key` says another (or off), and
 #     the desktop app's window see-through as Omarchy's terminals are:
 #     omarchy/hypr/amarchy.lua, loaded from ~/.config/hypr/hyprland.lua by a
 #     line ending in "-- amarchy"
@@ -363,7 +363,7 @@ install_home() {
 }
 
 # The key that brings amarchy to the front, in words (amarchy key: the
-# setting in ~/.config/amarchy/key, else Super+D), or nothing when off.
+# setting in ~/.config/amarchy/key, else Super+Shift+R), or nothing when off.
 key_words() {
   python3 - "${XDG_CONFIG_HOME:-$HOME/.config}/amarchy/key" <<'PY'
 import re, sys
@@ -372,7 +372,7 @@ try:
 except OSError:
     said = ""
 if said != "off":
-    chord = said if said and re.fullmatch(r"\w+[\w +:]*", said) else "SUPER + D"
+    chord = said if said and re.fullmatch(r"\w+[\w +:]*", said) else "SUPER + SHIFT + R"
     print("+".join(p.capitalize() if p.isupper() and len(p) > 1 else p for p in chord.split(" + ")))
 PY
 }

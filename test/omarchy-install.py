@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """omarchy/install.sh in a home of its own, on Omarchy 4's own config files:
-the Ⓐ plugin linked and put on the bar once, Super+D loaded from
+the Ⓐ plugin linked and put on the bar once, Super+Shift+R loaded from
 hyprland.lua, Amarchy in the Omarchy menu (read by Omarchy's own menu parser),
 what an amarchy from before left taken away, nothing changed on a second run,
 and --uninstall leaving the files as they were.
@@ -138,7 +138,7 @@ def main():
         before = snapshot(home)
         r = run(env)
         check("install runs", r.returncode == 0, r.stderr + r.stdout)
-        check("install says what it put", "the Ⓐ in the bar" in r.stdout and "Super+D" in r.stdout
+        check("install says what it put", "the Ⓐ in the bar" in r.stdout and "Super+Shift+R" in r.stdout
               and "Amarchy in the Omarchy menu" in r.stdout, r.stdout)
         after = snapshot(home)
         check("plugin linked to this checkout", after.get(".config/omarchy/plugins/amarchy.chats") == plugin_link,

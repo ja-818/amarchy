@@ -397,15 +397,16 @@ On Omarchy (a desktop of yours, on Omarchy 4; install.sh sets it up when Omarchy
 takes it away; docs/guide.md, "On Omarchy"):
   amarchy open [<id>|<machine>/<id>|amarchy://chat/<machine>/<id>]
                                         the desktop app (amarchy-desktop) at the front, on that chat: the
-                                        window it has, else the app started. Super+D, Amarchy in the
+                                        window it has, else the app started. Super+Shift+R, Amarchy in the
                                         Omarchy menu and the Ⓐ in the bar run it. Without the desktop app,
                                         the board in a browser window (an Omarchy web app)
   amarchy key [<keys>|off|default] [--check]
-                                        the key that brings amarchy to the front (amarchy open): Super+D,
-                                        which Omarchy leaves free, or the one you pick (Super+Ctrl+M: one
-                                        Omarchy uses gives way to amarchy while it's picked), or none; prints
-                                        it without one, and what else this machine's Hyprland binds there
-                                        (--check: only that). It changes at once, the Omarchy menu's hint too
+                                        the key that brings amarchy to the front (amarchy open):
+                                        Super+Shift+R, which Omarchy leaves free, or the one you pick
+                                        (Super+Ctrl+M: one Omarchy uses gives way to amarchy while it's
+                                        picked), or none; prints it without one, and what else this
+                                        machine's Hyprland binds there (--check: only that). It changes at
+                                        once, the Omarchy menu's hint too
   amarchy bar [--follow]                what the Ⓐ in Omarchy's bar shows, as JSON: how many chats need you
                                         and which (the first is what a click opens), from the board: this
                                         machine's own app server, else the first of your machines (amarchy
@@ -25643,7 +25644,7 @@ def migrate_look():
 # Omarchy is there, and its --uninstall takes them all away:
 #
 # - `amarchy open [chat]`: the desktop app (amarchy-desktop) at the front, on
-#   that chat. Super+D (amarchy key; omarchy/hypr/amarchy.lua), Amarchy in the Omarchy
+#   that chat. Super+Shift+R (amarchy key; omarchy/hypr/amarchy.lua), Amarchy in the Omarchy
 #   menu and the Ⓐ in the bar all run it. Without the desktop app, the board
 #   in a browser window.
 # - `amarchy bar --follow`: what the Ⓐ in Omarchy's bar shows (omarchy/plugin):
@@ -26002,15 +26003,17 @@ def cmd_open(args):
 # ---- the key (Omarchy)
 #
 # One key brings amarchy to the front on an Omarchy desktop (omarchy/hypr/
-# amarchy.lua binds it to `amarchy open`): Super+D, which Omarchy leaves free
-# (one hand reaches it), unless you set another (one Omarchy uses gives way to
+# amarchy.lua binds it to `amarchy open`): Super+Shift+R, which Omarchy leaves
+# free, on the Super+Shift and a letter Omarchy opens its apps with (one hand
+# reaches it; until 2026-11-25 it was Super+D, which Omarchy keeps for nothing
+# but isn't how it opens an app), unless you set another (one Omarchy uses gives way to
 # amarchy while it's picked). With no setting it's the default, so a new
 # default reaches every machine that never picked one. `amarchy key` says when
 # this machine's Hyprland has something else on the key (hyprctl binds). Kept in ~/.config/amarchy/key as a chord the way Omarchy's
 # Lua config writes them ("SUPER + CTRL + M"), or "off"; no file: the default.
 
 OMARCHY_KEY_FILE = CONFIG / "key"
-OMARCHY_KEY_DEFAULT = "SUPER + D"
+OMARCHY_KEY_DEFAULT = "SUPER + SHIFT + R"
 HYPR_MODMASK = {"SHIFT": 1, "CAPS": 2, "CTRL": 4, "ALT": 8, "MOD2": 16, "MOD3": 32, "SUPER": 64, "MOD5": 128}
 KEY_MODS = {"super": "SUPER", "win": "SUPER", "meta": "SUPER", "shift": "SHIFT", "ctrl": "CTRL", "control": "CTRL",
             "alt": "ALT", "mod3": "MOD3", "mod5": "MOD5"}

@@ -169,7 +169,7 @@ function png(w, h) {
 const PNG = png(600, 300);
 const POSTS = [
   ["fs-012", "Agents: stop babysitting", "Stop babysitting your agents.\nManage them: one board says who needs you and what for.", true],
-  ["fs-013", "Omarchy: amarchy blends in", "amarchy on Omarchy looks like a terminal.\nSuper+D brings it to the front.", false],
+  ["fs-013", "Omarchy: amarchy blends in", "amarchy on Omarchy looks like a terminal.\nSuper+Shift+R brings it to the front.", false],
   ["fs-014", "Boards: comment on a post", "Your agents keep boards now.\nComment on a card, and the agent revises it.", false],
   ["fs-015", "Phone: review on the go", "Review thirty posts from your phone before your coffee is cold.", false],
 ];
@@ -264,20 +264,20 @@ async function run(browser, base, layout) {
   await p.click(`${card("fs-013")} .bcard-comment`);
   check(where, await until(p, (sel) => !!document.querySelector(`${sel} .bbox textarea`) && document.activeElement === document.querySelector(`${sel} .bbox textarea`), card("fs-013")),
     "Comment: a box under the card, the keys in it");
-  await p.fill(`${card("fs-013")} .bbox textarea`, "Shorter, and lead with Super+D");
+  await p.fill(`${card("fs-013")} .bbox textarea`, "Shorter, and lead with Super+Shift+R");
   await p.click(`${card("fs-013")} .bbox .cbtn.send`);
   check(where, await sentBy(sent0 + 1), "sent");
   const said = sentNow()[sent0] || [];
-  check(where, said[1] === "fireship-fireship" && said[2] === "About “Omarchy: amarchy blends in” (board posts, card fs-013): Shorter, and lead with Super+D",
+  check(where, said[1] === "fireship-fireship" && said[2] === "About “Omarchy: amarchy blends in” (board posts, card fs-013): Shorter, and lead with Super+Shift+R",
     `to Fireship, naming the card (${JSON.stringify(said)})`);
-  check(where, await until(p, (sel) => /Shorter, and lead with Super\+D/.test((document.querySelector(`${sel} .ui-thread`) || {}).textContent || ""), card("fs-013")),
+  check(where, await until(p, (sel) => /Shorter, and lead with Super\+Shift\+R/.test((document.querySelector(`${sel} .ui-thread`) || {}).textContent || ""), card("fs-013")),
     "on its thread");
   // Fireship answers: a revision and a word on the thread.
-  cli(["board", "card", "posts", "--key", "fs-013", "--xpost", "-"], { input: "Super+D: amarchy, in front.\nOn Omarchy it looks like a terminal." });
-  cli(["board", "comment", "posts", "fs-013", "Led with Super+D, and cut it to two lines."]);
+  cli(["board", "card", "posts", "--key", "fs-013", "--xpost", "-"], { input: "Super+Shift+R: amarchy, in front.\nOn Omarchy it looks like a terminal." });
+  cli(["board", "comment", "posts", "fs-013", "Led with Super+Shift+R, and cut it to two lines."]);
   check(where, await until(p, (sel) => {
     const c = document.querySelector(sel);
-    return c && /Super\+D: amarchy, in front/.test(c.textContent) && /cut it to two lines/.test(c.textContent) && c.classList.contains("unseen")
+    return c && /Super\+Shift\+R: amarchy, in front/.test(c.textContent) && /cut it to two lines/.test(c.textContent) && c.classList.contains("unseen")
       && /Answered/.test((c.querySelector(".tpill") || {}).textContent || "");
   }, card("fs-013"), 10000), "Fireship's revision and answer: on the card, lit, Answered");
 
